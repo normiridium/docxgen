@@ -27,7 +27,7 @@ func main() {
 		*dataFile = "examples/data.json"
 	}
 	if *out == "" {
-		base := strings.TrimSuffix(filepath.Base(*in), ".docx")
+		base := strings.TrimSuffix(filepath.Join("examples", filepath.Base(*in)), ".docx")
 		*out = base + "_out.docx"
 	}
 

@@ -75,6 +75,10 @@ func NewFuncMap(opts Options) template.FuncMap {
 		"pad_right": PadRight, // {num|pad_right:`3`:`0`} → "420"
 		"money":     Money,    // {sum|money} → "1 234,56"
 		"roman":     Roman,    // {page|roman} → "XIV"
+
+		// declension mods
+		"decl":       Declension, // {user_fio|declension:`дательный`:`фамилия и.о.`} = "Сидорову И.П."
+		"declension": Declension,
 	}
 
 	// concat, который может брать значения других переменных из opts.Data
