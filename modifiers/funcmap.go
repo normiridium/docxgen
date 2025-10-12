@@ -66,6 +66,15 @@ func NewFuncMap(opts Options) template.FuncMap {
 		"replace":      Replace,      // {tag|replace:`исх.`:`экз.`}
 		"truncate":     Truncate,     // {tag|truncate:250:`...`}
 		"word_reverse": WordReverse,  // {fio|reverse}
+
+		// numeric mods
+		"numeral":   Numeral,  // {tag|numeral_case:`женский`:`творительный`:`восемью`:`ноль`}
+		"plural":    Plural,   // {count|plural:`день`:`дня`:`дней`} → "дня"
+		"sign":      Sign,     // {delta|sign} → "+5"
+		"pad_left":  PadLeft,  // {num|pad_left:`5`:`0`} → "00042"
+		"pad_right": PadRight, // {num|pad_right:`3`:`0`} → "420"
+		"money":     Money,    // {sum|money} → "1 234,56"
+		"roman":     Roman,    // {page|roman} → "XIV"
 	}
 
 	// concat, который может брать значения других переменных из opts.Data

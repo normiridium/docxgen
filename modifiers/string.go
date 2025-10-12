@@ -174,7 +174,7 @@ func ConcatFactory(data map[string]any) func(base string, parts ...string) strin
 				}
 			}
 
-			if val != "" {
+			if strings.TrimSpace(val) != "" {
 				chunks = append(chunks, val)
 			}
 		}
