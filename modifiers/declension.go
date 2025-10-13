@@ -1,9 +1,10 @@
 package modifiers
 
 import (
-	petrovich "docxgen/petrovich"
 	"fmt"
 	"strings"
+
+	"docxgen/petrovich"
 )
 
 // Declension — склоняет ФИО в указанный падеж и формат, используя petrovich-go.
@@ -46,13 +47,31 @@ func Declension(v any, opts ...string) string {
 	}
 
 	// определяем род по отчеству
-	gender := "androgynous"
+	gender := petrovich.Androgynous
 	if len(parts) == 3 {
 		if strings.HasSuffix(parts[2], "ич") {
-			gender = "male"
+			gender = petrovich.Male
 		}
 		if strings.HasSuffix(parts[2], "на") {
-			gender = "female"
+			gender = petrovich.Female
+		}
+	} else if len(parts) >= 1 {
+		// если отчества нет — пробуем по фамилии
+		last := strings.ToLower(parts[0])
+		switch {
+		case strings.HasSuffix(last, "ов"),
+			strings.HasSuffix(last, "ев"),
+			strings.HasSuffix(last, "ин"),
+			strings.HasSuffix(last, "ский"),
+			strings.HasSuffix(last, "цкий"):
+			gender = petrovich.Male
+
+		case strings.HasSuffix(last, "ова"),
+			strings.HasSuffix(last, "ева"),
+			strings.HasSuffix(last, "ина"),
+			strings.HasSuffix(last, "ая"),
+			strings.HasSuffix(last, "ская"):
+			gender = petrovich.Female
 		}
 	}
 
@@ -74,7 +93,7 @@ func Declension(v any, opts ...string) string {
 }
 
 // petrovichCase — маппинг наших падежных сокращений на библиотечные константы.
-func petrovichCase(c string) int {
+func petrovichCase(c string) petrovich.Case {
 	switch strings.ToLower(strings.TrimSpace(c)) {
 	case "род", "родительный", "gen", "р":
 		return petrovich.Genitive
