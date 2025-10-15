@@ -26,7 +26,9 @@ func Open(path string) (*Docx, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open docx: %w", err)
 	}
-	defer r.Close()
+	defer func(r *zip.ReadCloser) {
+		_ = r.Close()
+	}(r)
 
 	files := make(map[string][]byte)
 	for _, f := range r.File {
@@ -35,7 +37,7 @@ func Open(path string) (*Docx, error) {
 			return nil, fmt.Errorf("read entry %s: %w", f.Name, err)
 		}
 		buf, err := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close() // только для чтения, можно не реагировать на ошибку закрытия
 		if err != nil {
 			return nil, fmt.Errorf("read entry %s: %w", f.Name, err)
 		}

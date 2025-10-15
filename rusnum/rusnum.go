@@ -84,7 +84,7 @@ func ToWords(n int, opts ...Option) string {
 	// разбиваем число на триплеты (тысячи, миллионы и т.д.)
 	groups := splitThousands(n)
 
-	parts := []string{}
+	var parts []string
 
 	// идём от старших к младшим (последний элемент массива — самые большие)
 	for groupIdx := len(groups) - 1; groupIdx >= 0; groupIdx-- {
@@ -119,7 +119,7 @@ func splitThousands(n int) []int {
 	if n == 0 {
 		return nil
 	}
-	res := []int{}
+	var res []int
 	for n > 0 {
 		res = append(res, n%1000)
 		n /= 1000
@@ -138,7 +138,7 @@ func groupGender(group int, base Gender) Gender {
 }
 
 func spellTriplet(x int, gen Gender, cfg Options) string {
-	parts := []string{}
+	var parts []string
 
 	h := x / 100
 	t := (x / 10) % 10
@@ -213,7 +213,7 @@ func pluralIndex(n int) int {
 	}
 }
 
-func pick(row []string, c Case) string { return row[int(c)] }
+func pick(row []string, c Case) string { return row[c] }
 
 // ---- data tables (independently authored) ----
 

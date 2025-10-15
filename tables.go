@@ -30,7 +30,7 @@ func NewTableTemplate(tableXML string, cfg TableTemplateConfig) (*TableTemplateE
 	}
 
 	engine := &TableTemplateEngine{}
-	rows := []string{}
+	var rows []string
 	for _, p := range parts {
 		if strings.Contains(p, TableRowOpeningTag) {
 			rows = append(rows, p+TableRowClosingTag)

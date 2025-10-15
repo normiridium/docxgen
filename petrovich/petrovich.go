@@ -35,7 +35,7 @@ const (
 	Prepositional
 )
 
-type rules struct {
+type Rules struct {
 	Lastname   rulesGroup `json:"lastname"`
 	Firstname  rulesGroup `json:"firstname"`
 	Middlename rulesGroup `json:"middlename"`
@@ -56,19 +56,21 @@ type rule struct {
 // --- загрузка правил ---
 
 // LoadRules загружает rules.json из embed и возвращает объект для склонения.
-func LoadRules() (*rules, error) {
+func LoadRules() (*Rules, error) {
 	file, err := rulesPetrovich.Open("assets/rules.json")
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}
 
-	var r rules
+	var r Rules
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, err
 	}
@@ -77,15 +79,15 @@ func LoadRules() (*rules, error) {
 
 // --- публичный API ---
 
-func (r *rules) InfFirstname(value string, c Case, g Gender) string {
+func (r *Rules) InfFirstname(value string, c Case, g Gender) string {
 	return inflect(value, r.Firstname, c, g)
 }
 
-func (r *rules) InfLastname(value string, c Case, g Gender) string {
+func (r *Rules) InfLastname(value string, c Case, g Gender) string {
 	return inflect(value, r.Lastname, c, g)
 }
 
-func (r *rules) InfMiddlename(value string, c Case, g Gender) string {
+func (r *Rules) InfMiddlename(value string, c Case, g Gender) string {
 	return inflect(value, r.Middlename, c, g)
 }
 
@@ -93,7 +95,7 @@ func (r *rules) InfMiddlename(value string, c Case, g Gender) string {
 // fio: строка "Фамилия Имя Отчество"
 // c: падеж
 // short: true = "Иванов И.И.", false = полная форма
-func (r *rules) InfFio(fio string, c Case, short bool) string {
+func (r *Rules) InfFio(fio string, c Case, short bool) string {
 	fio = strings.TrimSpace(fio)
 	if fio == "" {
 		return ""
