@@ -67,6 +67,12 @@ func NewFuncMap(opts Options) template.FuncMap {
 		"truncate":     Truncate,     // {tag|truncate:250:`...`}
 		"word_reverse": WordReverse,  // {fio|reverse}
 
+		// text mods
+		"nowrap":   Nowrap,  // {tag|nowrap} — заменяет пробелы на неразрывные
+		"compact":  Compact, // {tag|compact} — заменяет пробелы на узкие неразрывные
+		"abbr":     Abbr,    // {fio|abbr} — делает сокращения и инициалы неразрывными с последующим словом
+		"ru_phone": RuPhone, // {user_phone|ru_phone} — форматирует российские телефоны с контекстной проверкой
+
 		// numeric mods
 		"numeral":   Numeral,  // {tag|numeral_case:`женский`:`творительный`:`восемью`:`ноль`}
 		"plural":    Plural,   // {count|plural:`день`:`дня`:`дней`} → "дня"
@@ -77,8 +83,11 @@ func NewFuncMap(opts Options) template.FuncMap {
 		"roman":     Roman,    // {page|roman} → "XIV"
 
 		// declension mods
-		"decl":       Declension, // {user_fio|declension:`дательный`:`фамилия и.о.`} = "Сидорову И.П."
+		"decl":       Declension, // {user_fio|declension:`дательный`:`фамилия и.о.`} → "Сидорову И.П."
 		"declension": Declension,
+
+		// date mods
+		"date_format": DateFormat, // {project.deadline|date_format:`02.01.2006`} → 14.10.2025
 	}
 
 	// concat, который может брать значения других переменных из opts.Data
@@ -105,8 +114,9 @@ func NewFuncMap(opts Options) template.FuncMap {
 
 func wrapStrings(f any) any {
 	return func(args ...any) any {
+
 		if len(args) > 1 {
-			// переносим последний аргумент (pipeline) в начало
+			//переносим последний аргумент (pipeline) в начало
 			reordered := make([]any, 0, len(args))
 			reordered = append(reordered, args[len(args)-1])
 			reordered = append(reordered, args[:len(args)-1]...)
