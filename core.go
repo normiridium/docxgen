@@ -139,34 +139,54 @@ func (d *Docx) ReplaceTag(tag, content string) error {
 
 // ExecuteTemplate – обработка документа через Go templates
 func (d *Docx) ExecuteTemplate(data map[string]any) error {
-	// получаем содержимое document.xml
+
+	// 1) ещё раз чиним теги в случае, если include внёс новые разорванные <w:t>
 	body, err := d.Content()
 	if err != nil {
 		return fmt.Errorf("execute template: %w", err)
 	}
 
-	// преобразуем синтаксис {fio|declension:`genitive`} → {{ .fio | declension "genitive" }}
+	body, err = d.RepairTags(body)
+	if err != nil {
+		return fmt.Errorf("repair tags after include: %w", err)
+	}
+
+	// 2) разворачиваем include перед шаблонизацией
+	body = d.ResolveIncludes(body)
+
+	body, err = d.RepairTags(body)
+	if err != nil {
+		return fmt.Errorf("repair tags after include: %w", err)
+	}
+
+	body = d.ProcessUnWrapParagraphTags(body)
+
+	// 3) преобразуем {fio|declension:`genitive`} → {{ .fio | declension "genitive" }}
 	tmplSrc := TransformTemplate(body)
 
-	// собираем FuncMap
+	// 4) собираем FuncMap
 	fm := modifiers.NewFuncMap(modifiers.Options{
 		Fonts:      d.fonts,
 		Data:       data,
 		ExtraFuncs: d.extraFuncs,
 	})
 
-	// парсим и выполняем шаблон
-	tmpl, err := template.New("docx").Delims("{", "}").Funcs(fm).Parse(tmplSrc)
+	// 5) парсим Go-шаблон
+	tmpl, err := template.New("docx").
+		Delims("{", "}").
+		Funcs(fm).
+		Parse(tmplSrc)
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
 	}
 
+	// 6) выполняем Go-шаблон
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return fmt.Errorf("execute template: %w", err)
 	}
 
-	// заменяем содержимое
+	// 7) записываем результат
 	d.UpdateContent(buf.String())
 	return nil
 }
