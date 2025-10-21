@@ -209,14 +209,14 @@ func (d *Docx) getIncludeXML(spec BracketIncludeSpec) (xmlFragment string, isTab
 
 	switch spec.Fragment {
 	case "body":
-		xml, err := GetBodyFragment(doc)
-		return xml, false, err
+		xmlFragment, err = GetBodyFragment(doc)
+		return xmlFragment, false, err
 	case "table":
-		xml, err := GetTableN(doc, spec.Index)
-		return xml, true, err
+		xmlFragment, err = GetTableN(doc, spec.Index)
+		return xmlFragment, true, err
 	case "p":
-		xml, err := GetParagraphN(doc, spec.Index)
-		return xml, false, err
+		xmlFragment, err = GetParagraphN(doc, spec.Index)
+		return xmlFragment, false, err
 	default:
 		return "", false, fmt.Errorf("unknown fragment")
 	}
