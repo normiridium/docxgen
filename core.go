@@ -14,9 +14,9 @@ import (
 
 // Docx – основная структура, содержит файлы документа
 type Docx struct {
-	files      map[string][]byte // имя файла в архиве -> содержимое
-	filePath   string            // путь к исходному файлу
-	extraFuncs template.FuncMap  // сюда будем складывать кастомные модификаторы
+	files      map[string][]byte                 // имя файла в архиве -> содержимое
+	filePath   string                            // путь к исходному файлу
+	extraFuncs map[string]modifiers.ModifierMeta // сюда будем складывать кастомные модификаторы
 	fonts      *metrics.FontSet
 }
 
@@ -171,14 +171,22 @@ func (d *Docx) ExecuteTemplate(data map[string]any) error {
 	return nil
 }
 
-// ImportModifiers – регистрирует пользовательские модификаторы
-func (d *Docx) ImportModifiers(fm template.FuncMap) {
+// ImportModifiers – регистрирует пользовательские модификаторы (аналог ExtraFuncs)
+func (d *Docx) ImportModifiers(fm map[string]modifiers.ModifierMeta) {
 	if d.extraFuncs == nil {
-		d.extraFuncs = make(template.FuncMap)
+		d.extraFuncs = make(map[string]modifiers.ModifierMeta)
 	}
 	for k, v := range fm {
 		d.extraFuncs[k] = v
 	}
+}
+
+// AddModifier — удобное добавление одного модификатора без карты
+func (d *Docx) AddModifier(name string, fn any, count int) {
+	if d.extraFuncs == nil {
+		d.extraFuncs = make(map[string]modifiers.ModifierMeta)
+	}
+	d.extraFuncs[name] = modifiers.ModifierMeta{Fn: fn, Count: count}
 }
 
 // LoadFontsForPSplit – подгружает шрифты для работы модификатора p_split

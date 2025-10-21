@@ -1,6 +1,8 @@
 package main
 
 import (
+	"docxgen"
+	"docxgen/modifiers"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,9 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
-
-	"docxgen"
 )
 
 func main() {
@@ -58,11 +57,16 @@ func main() {
 		log.Fatalf("шрифты: %v", err)
 	}
 
-	// пример кастомных модификаторов
-	doc.ImportModifiers(template.FuncMap{
-		"upper": func(s string) string { return strings.ToUpper(s) },
-		"lower": func(s string) string { return strings.ToLower(s) },
+	// пример кастомных модификаторов, регистрация пакетом
+	doc.ImportModifiers(map[string]modifiers.ModifierMeta{
+		"upper": {Fn: func(value string) string { return strings.ToUpper(value) }, Count: 0},
+		"wrap":  {Fn: func(v, l, r string) string { return l + v + r }, Count: 2},
 	})
+
+	// вариант - регистрация по одному
+	doc.AddModifier("lower", func(value string) string {
+		return strings.ToLower(value)
+	}, 0)
 
 	// выполняем шаблон
 	if err := doc.ExecuteTemplate(data); err != nil {
