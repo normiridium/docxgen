@@ -339,6 +339,9 @@ func toReflectValue(v any, target reflect.Type) reflect.Value {
 				return x
 			}
 		}
+	default:
+		// Неподдержанный тип — просто возвращаем zero value
+		return reflect.Zero(target)
 	}
 
 	// Не смогли — отдаём zero value нужного типа (стратегия B — не паниковать)
