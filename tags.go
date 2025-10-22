@@ -115,9 +115,9 @@ func (d *Docx) RepairTags(body string) (string, error) {
 	return b.String(), nil
 }
 
-// replaceTagWithParagraph — удаляет параграф с тегом и возвращает обновлённый контент.
+// ReplaceTagWithParagraph — удаляет параграф с тегом и возвращает обновлённый контент.
 // Используется как «unwrap»-механизм: параграф, содержащий тег, заменяется непосредственно контентом.
-func replaceTagWithParagraph(body, tag, content string) string {
+func ReplaceTagWithParagraph(body, tag, content string) string {
 	paragraphs := strings.Split(body, ParagraphPartTag)
 	for i, paragraph := range paragraphs {
 		if strings.Contains(paragraph, tag) {
@@ -155,7 +155,7 @@ func (d *Docx) ProcessUnWrapParagraphTags(body string) string {
 		name := strings.TrimSpace(body[start+2 : start+endRel])
 		normalized := "{" + name + "}"
 
-		body = replaceTagWithParagraph(body, starTag, normalized)
+		body = ReplaceTagWithParagraph(body, starTag, normalized)
 	}
 }
 
@@ -189,7 +189,7 @@ func (d *Docx) ResolveIncludes(body string) string {
 		}
 
 		// успешная замена
-		body = replaceTagWithParagraph(body, spec.RawTag, xmlFrag)
+		body = ReplaceTagWithParagraph(body, spec.RawTag, xmlFrag)
 	}
 
 	return body
