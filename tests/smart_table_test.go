@@ -9,7 +9,7 @@ import (
 func TestRenderSmartTable_MixNamedAndPositional(t *testing.T) {
 	table := `<w:tbl>` +
 		`<w:tr><w:tc><w:p><w:t>HEADER</w:t></w:p></w:tc></w:tr>` +
-		`<w:tr><w:tc><w:p><w:t>{title}</w:t></w:p></w:tc></w:tr>` +
+		`<w:tr><w:tc><w:p><w:t>{title|abbr}</w:t></w:p></w:tc></w:tr>` +
 		`<w:tr><w:tc><w:p><w:t>{fio}</w:t></w:p></w:tc><w:tc><w:p><w:t>{pos}</w:t></w:p></w:tc></w:tr>` +
 		`<w:tr><w:tc><w:p><w:t>%[1]s</w:t></w:p></w:tc><w:tc><w:p><w:t>%[2]s</w:t></w:p></w:tc></w:tr>` +
 		`<w:tr><w:tc><w:p><w:t>FOOTER</w:t></w:p></w:tc></w:tr>` +
@@ -30,7 +30,7 @@ func TestRenderSmartTable_MixNamedAndPositional(t *testing.T) {
 
 	want := `<w:tbl>` +
 		`<w:tr><w:tc><w:p><w:t>HEADER</w:t></w:p></w:tc></w:tr>` +
-		`<w:tr><w:tc><w:p><w:t>Отдел продаж</w:t></w:p></w:tc></w:tr>` +
+		`<w:tr><w:tc><w:p><w:t>{ ` + "`Отдел продаж`" + ` | abbr }</w:t></w:p></w:tc></w:tr>` +
 		`<w:tr><w:tc><w:p><w:t>Иванов И.И.</w:t></w:p></w:tc><w:tc><w:p><w:t>Инженер</w:t></w:p></w:tc></w:tr>` +
 		`<w:tr><w:tc><w:p><w:t>Петров М.С.</w:t></w:p></w:tc><w:tc><w:p><w:t>Директор</w:t></w:p></w:tc></w:tr>` +
 		`<w:tr><w:tc><w:p><w:t>Сидоров Н.Д.</w:t></w:p></w:tc><w:tc><w:p><w:t>Бухгалтер</w:t></w:p></w:tc></w:tr>` +
@@ -88,7 +88,7 @@ func TestRenderSmartTable_PositionalInsideBackticks(t *testing.T) {
 		t.Fatalf("RenderSmartTable error: %v", err)
 	}
 
-	if !strings.Contains(got, "{`BBB`|abbr}") {
+	if !strings.Contains(got, "{{ `BBB` | abbr }}") {
 		t.Fatalf("backticked placeholder should be substituted using next slice item: %s", got)
 	}
 

@@ -149,6 +149,12 @@ func looksLikeOldStyle(tag string) bool {
 	if strings.HasPrefix(t, ".") {
 		return false
 	}
+	// Уже Go-выражения — НЕ трогаем
+	if strings.HasPrefix(t, ".") ||
+		strings.HasPrefix(t, "`") ||
+		strings.HasPrefix(t, "\"") {
+		return false
+	}
 	if strings.HasPrefix(t, "if ") || strings.HasPrefix(t, "else") ||
 		strings.HasPrefix(t, "end") || strings.HasPrefix(t, "range ") ||
 		strings.HasPrefix(t, "with ") {

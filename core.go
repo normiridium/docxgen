@@ -154,6 +154,8 @@ func (d *Docx) ExecuteTemplate(data map[string]any) error {
 	// 2) разворачиваем include перед шаблонизацией
 	body = d.ResolveIncludes(body)
 
+	body = d.ResolveTables(body, data)
+
 	body, err = d.RepairTags(body)
 	if err != nil {
 		return fmt.Errorf("repair tags after include: %w", err)

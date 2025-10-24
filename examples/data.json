@@ -20,5 +20,24 @@
     "position": "директор департамента"
   },
   "abstract_text": "В настоящем докладе представлен анализ текущего состояния проекта по внедрению ERP-системы. Рассматриваются достигнутые результаты, основные риски и планы по их минимизации. Особое внимание уделено вопросам интеграции и подготовке сотрудников к работе с новой платформой.",
-  "count_persons": 12
+  "count_persons": 12,
+  "budget_report": [
+    { "title_sub_block": { "title_sub_block": "Подготовка" } },
+    { "budget_report_row": { "n": 1, "annotation": "Сбор и анализ требований", "deadline": "2025-10-20", "responsible": "Сергеев А.А.", "price": 120000 } },
+    { "budget_report_row": { "n": 2, "annotation": "Настройка инфраструктуры и серверов", "deadline": "2025-10-30", "responsible": "Белова Г.М.", "price": 240000 } },
+
+    { "title_sub_block": { "title_sub_block": "Разработка" } },
+    { "budget_report_row": { "n": 3, "annotation": "Разработка модулей интеграции", "deadline": "2025-12-01", "responsible": "Иванов И.И.", "price": 350000 } },
+    { "budget_report_row": { "n": 4, "annotation": "Разработка бизнес-логики ERP", "deadline": "2026-01-15", "responsible": "Ким Д.С.", "price": 620000 } },
+
+    { "title_sub_block": { "title_sub_block": "Тестирование" } },
+    { "budget_report_row": { "n": 5, "annotation": "Функциональное тестирование", "deadline": "2026-02-01", "responsible": "Белов П.П.", "price": 185000 } },
+    { "budget_report_row": { "n": 6, "annotation": "Нагрузочное тестирование", "deadline": "2026-02-15", "responsible": "Миронова К.А.", "price": 210000 } },
+
+    { "title_sub_block": { "title_sub_block": "Внедрение" } },
+    { "budget_report_row": { "n": 7, "annotation": "Обучение сотрудников", "deadline": "2026-02-20", "responsible": "Смирнова О.В.", "price": 90000 } },
+    { "budget_report_row": { "n": 8, "annotation": "Развёртывание на продуктив", "deadline": "2026-03-01", "responsible": "Кириллов М.С.", "price": 160000 } },
+
+    { "budget_report_total": { "total": 1975000} }
+  ]
 }

@@ -3,6 +3,7 @@ package docxgen
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -10,13 +11,20 @@ import (
 // Public API
 // ============================================================================
 
-// RenderSmartTable — DOCX-driven генерация:
-// • идём по строкам DOCX сверху вниз;
-// • positional (%[N]s, в т.ч. внутри бэктиков) — берёт РОВНО ОДИН следующий slice-item;
-// • named ({name} без модификаторов) — реплицируется, пока есть подходящие map-items (есть хоть один ключ из тэгов строки);
-// • строка с только "неизвестными" тегами (ни один тег не встречается в items) — считается статичной и выводится;
-// • статичные строки всегда выводятся;
-// • map НИКОГДА не подставляем в %[N]s; slice НИКОГДА не лезет в {name}.
+// RenderSmartTable — DOCX-driven генерация одной таблицы.
+// Правила:
+// • named ({name}[|mod]) — рендерим строку ПОКА есть подходящие map-items (есть хотя бы один ключ из тэгов строки).
+//   - {name}           → подставляем текст как есть (raw)  [см. xmlEscape хук ниже]
+//   - {name|modifier}  → {{ `value` | modifier }} (backticks обязательно)
+//
+// • positional (%[N]s и кейсы в backticks внутри {`...`|mod}) — СЪЕДАЕМ РОВНО ОДИН slice-item на строку DOCX.
+//   - голые %[N]s      → подставляем текст как есть (raw)
+//   - {`%[N]s`|mod}    → {{ `value` | mod }}
+//
+// • строки без плейсхолдеров — статичные, выводим как есть.
+// • неизвестные теги ({unknown}) оставляем как есть.
+// • backticks сохраняем обязательно.
+// • xml-экранирование отключено, но есть закомментированный хук (см. ниже).
 func RenderSmartTable(tableXML string, items []any) (string, error) {
 	inner := stripOuterTable(tableXML)
 	rows := extractTableRows(inner)
@@ -27,7 +35,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 	// Разделяем items на очереди
 	mapQueue := []map[string]any{}
 	sliceQueue := [][]any{}
-	knownKeys := make(map[string]struct{}) // для определения "неизвестных" named-строк как статичных
+	knownKeys := make(map[string]struct{}) // для определения "совсем-неизвестных" named-строк как статичных
 
 	for _, it := range items {
 		if m, ok := extractInnerMapAny(it); ok {
@@ -41,34 +49,31 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 			sliceQueue = append(sliceQueue, arr)
 			continue
 		}
-		// прочие типы игнорируем
 	}
 
 	var outRows []string
 
-	// Идём по строкам DOCX
 	for _, rowXML := range rows {
 		meta := parseTplMeta(rowXML)
 
 		switch {
-		// ======= POSITIONAL (доминирует, даже если внутри фигурных скобок) =======
+		// ======= POSITIONAL (доминирует, даже если внутри фигурных) =======
 		case meta.percentSeen > 0:
-			// РОВНО ОДИН следующий slice-item (если есть)
 			if len(sliceQueue) > 0 {
 				arr := sliceQueue[0]
 				sliceQueue = sliceQueue[1:]
-				outRows = append(outRows, renderPositional(rowXML, arr, meta.percentSeen))
+				outRows = append(outRows, renderPositional(rowXML, arr))
 			}
-			// иначе — пропуск строки
+			// иначе пропускаем строку
 
-		// ======= NAMED (чистые {name}) =======
+		// ======= NAMED (чистые имена до первого | или }) =======
 		case len(meta.names) > 0:
-			// Если НИ ОДНОГО тега этой строки нет в knownKeys — это статичная строка (глобальная разметка)
+			// Если ни один тег строки нигде не встречается — считаем статичной (например {company} в HEADER)
 			if !metaHasAnyKnown(meta, knownKeys) {
 				outRows = append(outRows, rowXML)
 				continue
 			}
-			// Иначе — это шаблон: реплицируем ПОКА есть подходящие map-items
+			// Иначе — шаблон: реплицируем, пока есть подходящие map-items
 			for {
 				idx := findMatchingMap(meta, mapQueue)
 				if idx < 0 {
@@ -88,10 +93,157 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 }
 
 // ============================================================================
+// Optional: Resolve [table name] ... </w:tbl> blocks against data[name]
+// ============================================================================
+
+// ResolveTables — находит блоки вида:
+//
+//	[table/name]
+//	<w:tbl>...</w:tbl>
+//	[/table]
+//
+// и заменяет их на результат RenderSmartTable(...), используя items из data[name].
+//
+// Вариант A (как договорились):
+//   - если данных нет — таблицу оставляем как есть,
+//     но абзацы с маркерами [table/...] и [/table] удаляем.
+//   - если данные есть — подставляем отрендеренную таблицу на место абзаца с [table/...],
+//     абзац с [/table] удаляем, исходную таблицу из блока вырезаем.
+//
+// Работает без регулярок, в стиле ResolveIncludes.
+func (d *Docx) ResolveTables(body string, data map[string]any) string {
+	const openPrefix = "[table/"
+	const closeTag = "[/table]"
+
+	for {
+		// 1) ищем открывающий маркер
+		start := strings.Index(body, openPrefix)
+		if start < 0 {
+			break
+		}
+
+		// ищем конец открывающего тега ']'
+		openEnd := strings.Index(body[start:], "]")
+		if openEnd < 0 {
+			// битая разметка — удалим маркерный абзац и выйдем
+			body = ReplaceTagWithParagraph(body, body[start:], "")
+			break
+		}
+		openEnd = start + openEnd + 1
+
+		openTag := body[start:openEnd] // например: [table/budget_report]
+		name := strings.TrimSuffix(strings.TrimPrefix(openTag, openPrefix), "]")
+
+		// 2) ищем закрывающий маркер [/table] ПОСЛЕ открывающего
+		closePos := strings.Index(body[openEnd:], closeTag)
+		if closePos < 0 {
+			// нет закрывающего — просто удалим абзац с открывающим маркером
+			body = ReplaceTagWithParagraph(body, openTag, "")
+			break
+		}
+		closePos = openEnd + closePos
+
+		// 3) содержимое между маркерами
+		inner := body[openEnd:closePos]
+
+		// 4) найдём первую таблицу внутри блока
+		tblStart := strings.Index(inner, "<w:tbl")
+		tblEnd := strings.Index(inner, "</w:tbl>")
+		if tblStart < 0 || tblEnd < 0 {
+			// таблицы нет — удалим оба маркера и двинемся дальше
+			body = ReplaceTagWithParagraph(body, closeTag, "")
+			body = ReplaceTagWithParagraph(body, openTag, "")
+			continue
+		}
+		tblEnd += len("</w:tbl>")
+		tableXML := inner[tblStart:tblEnd]
+
+		// 5) подготовим исходник без блоков, если понадобится
+		// (удалим закрывающий маркерный абзац сразу — он нам точно не нужен)
+		body = ReplaceTagWithParagraph(body, closeTag, "")
+
+		// 6) проверим наличие данных
+		raw, ok := data[name]
+		if !ok {
+			// Данных нет → оставить таблицу как есть, только убрать маркеры:
+			body = ReplaceTagWithParagraph(body, openTag, "")
+			// (исходная таблица остаётся на месте между абзацами)
+			continue
+		}
+
+		// 7) нормализуем items и рендерим
+		items, ok := normalizeItems(raw)
+		if !ok {
+			// некорректный формат данных — оставляем исходную таблицу, убрав маркеры
+			body = ReplaceTagWithParagraph(body, openTag, "")
+			continue
+		}
+
+		rendered, err := RenderSmartTable(tableXML, items)
+		if err != nil || strings.TrimSpace(rendered) == "" {
+			// не получилось — оставим исходную таблицу, откроющий маркерный абзац уберём
+			body = ReplaceTagWithParagraph(body, openTag, "")
+			continue
+		}
+
+		// 8) удалим из документа исходную таблицу (первое вхождение в пределах блока)
+		//    Так как мы ещё не трогали сам inner, tableXML в тексте всё ещё существует.
+		//    Удаляем РОВНО одно вхождение, чтобы не задеть другие таблицы.
+		body = strings.Replace(body, tableXML, "", 1)
+
+		// 9) подставим отрендеренную таблицу вместо абзаца с открывающим маркером
+		body = ReplaceTagWithParagraph(body, openTag, rendered)
+
+		// 10) цикл продолжится — ищем следующий [table/...]
+	}
+
+	return body
+}
+
+func normalizeItems(v any) ([]any, bool) {
+	switch x := v.(type) {
+	case []any:
+		return x, true
+	case []map[string]any:
+		out := make([]any, len(x))
+		for i := range x {
+			out[i] = x[i]
+		}
+		return out, true
+	case []map[string]string:
+		out := make([]any, len(x))
+		for i := range x {
+			m := make(map[string]any, len(x[i]))
+			for k, vv := range x[i] {
+				m[k] = vv
+			}
+			out[i] = m
+		}
+		return out, true
+	case [][]any:
+		out := make([]any, len(x))
+		for i := range x {
+			out[i] = x[i]
+		}
+		return out, true
+	case [][]string:
+		out := make([]any, len(x))
+		for i := range x {
+			aa := make([]any, len(x[i]))
+			for j := range x[i] {
+				aa[j] = x[i][j]
+			}
+			out[i] = aa
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// ============================================================================
 // Matching / Rendering
 // ============================================================================
 
-// среди meta.names есть ли ключ, встречающийся в items вообще
 func metaHasAnyKnown(meta tplMeta, known map[string]struct{}) bool {
 	for _, n := range meta.names {
 		if _, ok := known[n]; ok {
@@ -101,7 +253,6 @@ func metaHasAnyKnown(meta tplMeta, known map[string]struct{}) bool {
 	return false
 }
 
-// первый map, у которого есть хотя бы один тег из meta.names
 func findMatchingMap(meta tplMeta, queue []map[string]any) int {
 	for i, m := range queue {
 		for _, name := range meta.names {
@@ -113,31 +264,98 @@ func findMatchingMap(meta tplMeta, queue []map[string]any) int {
 	return -1
 }
 
+// renderNamed:
+// 1) {name|mod...} → {{ `value` | mod... }}  (если name есть в data)
+// 2) {name}        → value (raw)             (если name есть в data)
+// 3) неизвестные теги оставляем как есть
 func renderNamed(xmlTpl string, meta tplMeta, data map[string]any) string {
 	out := xmlTpl
-	// Подставляем ТОЛЬКО существующие ключи; остальные {unknown} остаются как есть.
-	for _, name := range meta.names {
-		if val, ok := data[name]; ok {
-			out = strings.ReplaceAll(out, "{"+name+"}", xmlEscape(fmt.Sprint(val)))
+
+	// Сначала — {name|mod...}
+	reNameMod := regexp.MustCompile(`\{[ \t]*([A-Za-z0-9_.]+)[ \t]*\|([^}]*)}`)
+	out = reNameMod.ReplaceAllStringFunc(out, func(tok string) string {
+		m := reNameMod.FindStringSubmatch(tok)
+		if len(m) != 3 {
+			return tok
 		}
+		name := m[1]
+		modTail := strings.TrimSpace(m[2])
+		valAny, ok := data[name]
+		if !ok {
+			return tok // неизвестное имя — оставляем как есть
+		}
+		val := fmt.Sprint(valAny)
+
+		// // Включить XML-экранирование при необходимости:
+		// val = xmlEscape(val)
+
+		// { `value` | modTail }
+		return "{ `" + val + "` | " + modTail + " }"
+	})
+
+	// Затем — чистые {name}
+	for _, name := range meta.names {
+		valAny, ok := data[name]
+		if !ok {
+			continue // оставляем {name} как есть
+		}
+		val := fmt.Sprint(valAny)
+		// val = xmlEscape(val) // <- включить, если решишь экранировать
+
+		// заменяем только "чистые" {name} (без модификатора)
+		reExact := regexp.MustCompile(`\{[ \t]*` + regexp.QuoteMeta(name) + `[ \t]*\}`)
+		out = reExact.ReplaceAllString(out, val)
 	}
+
 	return out
 }
 
-// need — сколько %[N]s найдено в строке
-func renderPositional(xmlTpl string, arr []any, need int) string {
-	// добиваем пустыми строками, чтобы не получить BADINDEX
-	if len(arr) < need {
-		padded := make([]any, need)
-		copy(padded, arr)
-		for i := len(arr); i < need; i++ {
-			padded[i] = ""
+// renderPositional:
+// 1) {`%[N]s ...`|mod} → {{ `resolved` | mod }}
+// 2) голые %[N]s       → текстовые подстановки (raw)
+// Паддинг пустыми строками при нехватке значений — встроен.
+func renderPositional(xmlTpl string, arr []any) string {
+	out := xmlTpl
+
+	// 1) {`...`|mod} с возможными %[N]s внутри backticks
+	reBacktickMod := regexp.MustCompile("(?s)\\{[ \\t]*`([^`]*)`[ \\t]*\\|([^}]*)}")
+	out = reBacktickMod.ReplaceAllStringFunc(out, func(tok string) string {
+		m := reBacktickMod.FindStringSubmatch(tok)
+		if len(m) != 3 {
+			return tok
 		}
-		arr = padded
-	}
-	args := make([]any, len(arr))
-	copy(args, arr)
-	return fmt.Sprintf(xmlTpl, args...)
+		rawInside := m[1] // может содержать %[N]s
+		modTail := strings.TrimSpace(m[2])
+
+		resolved := replacePerc(rawInside, arr)
+
+		// resolved = xmlEscape(resolved) // <- включить, если решишь экранировать
+		return "{{ `" + resolved + "` | " + modTail + " }}"
+	})
+
+	// 2) Оставшиеся %[N]s (вне модификаторных блоков) → текст
+	out = replacePerc(out, arr)
+
+	return out
+}
+
+// replacePerc — заменяет все %[N]s в строке значениями из arr.
+// Индексация 1-базная, при нехватке значений — пустая строка.
+func replacePerc(s string, arr []any) string {
+	return rePerc.ReplaceAllStringFunc(s, func(tok string) string {
+		m := rePerc.FindStringSubmatch(tok)
+		if len(m) != 2 {
+			return ""
+		}
+		n, _ := strconv.Atoi(strings.TrimSpace(m[1]))
+		idx := n - 1
+		if idx < 0 || idx >= len(arr) {
+			return ""
+		}
+		val := fmt.Sprint(arr[idx])
+		// val = xmlEscape(val) // <- включить, если решишь экранировать
+		return val
+	})
 }
 
 // ============================================================================
@@ -145,23 +363,20 @@ func renderPositional(xmlTpl string, arr []any, need int) string {
 // ============================================================================
 
 type tplMeta struct {
-	names       []string // {name}, только "чистые" имена без пайпов/бэктиков
-	percentSeen int      // количество %[N]s в строке (доминирующий признак позиционного шаблона)
+	names       []string // имена {name} до первого | или }
+	percentSeen int      // количество встретившихся %[N]s
 }
 
 var (
-	// Матчит только чистые {name} без модификаторов/бэктиков: {fio}, {pos}, {title}, {dep.team}
-	reBrace = regexp.MustCompile(`\{[ \t]*([A-Za-z0-9_.]+)[ \t]*}`)
-	// Матчит %[N]s (включая случаи внутри бэктиков), чтобы строка считалась positional при наличии любого %[]
+	// Имена: захватывает {fio}, {fio|...}, {dep.team}, {dep.team | ...}
+	reBraceName = regexp.MustCompile(`\{[ \t]*([A-Za-z0-9_.]+)[ \t]*[|}]`)
+	// Позиционные: %[N]s
 	rePerc = regexp.MustCompile(`%\[\s*(\d+)\s*]s`)
 )
 
 func parseTplMeta(rowXML string) tplMeta {
 	meta := tplMeta{}
-	// IMPORTANT: сначала считаем позиционные — это доминирующий признак строки
-	meta.percentSeen = len(rePerc.FindAllStringSubmatch(rowXML, -1))
-	// затем чистые {name}; backticks/pipe не пройдут, и это хорошо
-	for _, m := range reBrace.FindAllStringSubmatch(rowXML, -1) {
+	for _, m := range reBraceName.FindAllStringSubmatch(rowXML, -1) {
 		if len(m) >= 2 {
 			name := strings.TrimSpace(m[1])
 			if name != "" {
@@ -169,6 +384,7 @@ func parseTplMeta(rowXML string) tplMeta {
 			}
 		}
 	}
+	meta.percentSeen = len(rePerc.FindAllStringSubmatch(rowXML, -1))
 	return meta
 }
 
@@ -176,8 +392,6 @@ func parseTplMeta(rowXML string) tplMeta {
 // Data Extractors
 // ============================================================================
 
-// Предпочитает формат { anyKey: { ... } }, но допускает плоский map как inner-map,
-// если в значениях НЕТ массивов (чтобы не спутать со slice-item).
 func extractInnerMapAny(it any) (map[string]any, bool) {
 	if outer, ok := it.(map[string]any); ok {
 		if len(outer) == 1 {
@@ -187,7 +401,7 @@ func extractInnerMapAny(it any) (map[string]any, bool) {
 				}
 			}
 		}
-		// Fallback: если в значениях нет массивов — считаем плоским map
+		// fallback: если в значениях нет массивов — считаем плоским map
 		for _, v := range outer {
 			switch v.(type) {
 			case []any, []string:
@@ -218,7 +432,7 @@ func extractInnerSliceAny(it any) ([]any, bool) {
 }
 
 // ============================================================================
-// XML helpers / Rows
+// XML / DOCX utils
 // ============================================================================
 
 func stripOuterTable(s string) string {
@@ -242,6 +456,10 @@ func extractTableRows(tbl string) []string {
 	return rows
 }
 
+// XML-escape хук — по умолчанию выключен.
+// Оставляю, чтобы можно было легко включить в нужный момент.
+// минимальная XML-экранизация (вставляем в <w:t>)
+/*
 func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
@@ -250,3 +468,4 @@ func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, `'`, "&apos;")
 	return s
 }
+*/
