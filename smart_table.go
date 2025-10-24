@@ -8,91 +8,6 @@ import (
 )
 
 // ============================================================================
-// Public API
-// ============================================================================
-
-// RenderSmartTable — DOCX-driven генерация одной таблицы.
-// Правила:
-// • named ({name}[|mod]) — рендерим строку ПОКА есть подходящие map-items (есть хотя бы один ключ из тэгов строки).
-//   - {name}           → подставляем текст как есть (raw)  [см. xmlEscape хук ниже]
-//   - {name|modifier}  → {{ `value` | modifier }} (backticks обязательно)
-//
-// • positional (%[N]s и кейсы в backticks внутри {`...`|mod}) — СЪЕДАЕМ РОВНО ОДИН slice-item на строку DOCX.
-//   - голые %[N]s      → подставляем текст как есть (raw)
-//   - {`%[N]s`|mod}    → {{ `value` | mod }}
-//
-// • строки без плейсхолдеров — статичные, выводим как есть.
-// • неизвестные теги ({unknown}) оставляем как есть.
-// • backticks сохраняем обязательно.
-// • xml-экранирование отключено, но есть закомментированный хук (см. ниже).
-func RenderSmartTable(tableXML string, items []any) (string, error) {
-	inner := stripOuterTable(tableXML)
-	rows := extractTableRows(inner)
-	if len(rows) == 0 {
-		return "", fmt.Errorf("smart table: no rows found")
-	}
-
-	// Разделяем items на очереди
-	mapQueue := []map[string]any{}
-	sliceQueue := [][]any{}
-	knownKeys := make(map[string]struct{}) // для определения "совсем-неизвестных" named-строк как статичных
-
-	for _, it := range items {
-		if m, ok := extractInnerMapAny(it); ok {
-			mapQueue = append(mapQueue, m)
-			for k := range m {
-				knownKeys[k] = struct{}{}
-			}
-			continue
-		}
-		if arr, ok := extractInnerSliceAny(it); ok {
-			sliceQueue = append(sliceQueue, arr)
-			continue
-		}
-	}
-
-	var outRows []string
-
-	for _, rowXML := range rows {
-		meta := parseTplMeta(rowXML)
-
-		switch {
-		// ======= POSITIONAL (доминирует, даже если внутри фигурных) =======
-		case meta.percentSeen > 0:
-			if len(sliceQueue) > 0 {
-				arr := sliceQueue[0]
-				sliceQueue = sliceQueue[1:]
-				outRows = append(outRows, renderPositional(rowXML, arr))
-			}
-			// иначе пропускаем строку
-
-		// ======= NAMED (чистые имена до первого | или }) =======
-		case len(meta.names) > 0:
-			// Если ни один тег строки нигде не встречается — считаем статичной (например {company} в HEADER)
-			if !metaHasAnyKnown(meta, knownKeys) {
-				outRows = append(outRows, rowXML)
-				continue
-			}
-			// Иначе — шаблон: реплицируем, пока есть подходящие map-items
-			for {
-				idx := findMatchingMap(meta, mapQueue)
-				if idx < 0 {
-					break
-				}
-				outRows = append(outRows, renderNamed(rowXML, meta, mapQueue[idx]))
-				mapQueue = append(mapQueue[:idx], mapQueue[idx+1:]...)
-			}
-
-		// ======= STATIC =======
-		default:
-			outRows = append(outRows, rowXML)
-		}
-	}
-
-	return TableOpeningTag + strings.Join(outRows, "") + TableEndingTag, nil
-}
-
-// ============================================================================
 // Optional: Resolve [table name] ... </w:tbl> blocks against data[name]
 // ============================================================================
 
@@ -240,9 +155,258 @@ func normalizeItems(v any) ([]any, bool) {
 	return nil, false
 }
 
+/*
+КАНОН:
+
+• Порядок строк = порядок данных (DATA диктует порядок).
+• DOCX — библиотека форм: уникальные шаблонные строки (named/positional),
+  HEADER (до первой шаблонной строки) и FOOTER (после последней).
+• Matching: Pass#1 (биндинг key→template), Pass#2 (waitZone retry), Pass#3 (bucket fields union).
+• Render: идём ПО ДАННЫМ, для каждого item используем закреплённый шаблон и правила подстановки:
+    L1  — локальное поле из item
+    L2  — если поле встречалось в bucket (union), но в item его нет → подставляем "" (E1)
+    L3  — если поле глобальное → оставляем {name} как есть, ExecuteTemplate потом разберёт
+    L4  — если нигде нет → оставляем {name} как есть
+• Positional: 1 item slice → 1 строка шаблона; %[N]s и {`%[N]s`|mod} поддержаны.
+• Backticks сохраняем обязательно.
+*/
+
 // ============================================================================
-// Matching / Rendering
+// Public API
 // ============================================================================
+type normItem struct {
+	raw      any
+	groupKey string
+	kind     string
+	mapVal   map[string]any
+	sliceVal []any
+}
+
+func RenderSmartTable(tableXML string, items []any) (string, error) {
+	inner := stripOuterTable(tableXML)
+	rows := extractTableRows(inner)
+	if len(rows) == 0 {
+		return "", fmt.Errorf("smart table: no rows found")
+	}
+
+	// 1) Разметим строки таблицы: header / templateRows / footer
+	type tplRow struct {
+		idx      int
+		xml      string
+		meta     tplMeta
+		isNamed  bool
+		isPos    bool
+		isStatic bool
+	}
+	var (
+		tplRows     []tplRow
+		firstTplIdx = -1
+		lastTplIdx  = -1
+	)
+	localKeys := collectLocalKeys(items)
+	for i, r := range rows {
+		m := parseTplMeta(r)
+		isPos := m.percentSeen > 0
+		isNamed := !isPos && len(m.names) > 0 && metaHasAnyKnown(m, localKeys)
+		isStatic := !isPos && !isNamed
+		tr := tplRow{idx: i, xml: r, meta: m, isNamed: isNamed, isPos: isPos, isStatic: isStatic}
+		if isNamed || isPos {
+			if firstTplIdx == -1 {
+				firstTplIdx = i
+			}
+			lastTplIdx = i
+		}
+		tplRows = append(tplRows, tr)
+	}
+
+	// Header/ Footer
+	var headerRows, footerRows []string
+	if firstTplIdx > 0 {
+		for i := 0; i < firstTplIdx; i++ {
+			headerRows = append(headerRows, tplRows[i].xml)
+		}
+	}
+	if lastTplIdx >= 0 && lastTplIdx < len(tplRows)-1 {
+		for i := lastTplIdx + 1; i < len(tplRows); i++ {
+			footerRows = append(footerRows, tplRows[i].xml)
+		}
+	}
+
+	// Коллекция только шаблонных строк (named/positional) — библиотека форм
+	var templates []tplRow
+	for _, tr := range tplRows {
+		if tr.isNamed || tr.isPos {
+			templates = append(templates, tr)
+		}
+	}
+	if len(templates) == 0 {
+		// нет ни одной шаблонной строки → вернуть исходную таблицу
+		return TableOpeningTag + inner + TableEndingTag, nil
+	}
+
+	var nitems []normItem
+	for _, it := range items {
+		ni := normalizeItem(it)
+		if ni.kind == "other" {
+			// одиночные скаляры не поддерживаем как осмысленные строки (оставим на будущее)
+			continue
+		}
+		nitems = append(nitems, ni)
+	}
+	if len(nitems) == 0 {
+		// только header+footer
+		return TableOpeningTag + strings.Join(headerRows, "") + strings.Join(footerRows, "") + TableEndingTag, nil
+	}
+
+	// 3) Matching Phase#1: биндинг key→template, плюс waitZone
+	binding := make(map[string]int)      // groupKey -> templates[idx]
+	assigned := make([]int, len(nitems)) // по индексу item -> индекс templates, либо -1 (skip) либо -2 (wait)
+	for i := range assigned {
+		assigned[i] = -2 // по умолчанию в "ожидании"
+	}
+	type bucket struct {
+		tplIdx int
+		items  []int // индексы nitems
+	}
+	// buckets по индексу шаблона
+	buckets := make([]bucket, len(templates))
+	for i := range buckets {
+		buckets[i] = bucket{tplIdx: i}
+	}
+
+	tryMatch := func(it normItem) (tplIdx int, score int) {
+		bestScore := -1
+		bestIdx := -1
+		for i, t := range templates {
+			sc := 0
+			if it.kind == "map" && t.isNamed {
+				// score = число совпавших полей
+				for _, name := range t.meta.names {
+					if _, ok := it.mapVal[name]; ok {
+						sc++
+					}
+				}
+			} else if it.kind == "slice" && t.isPos {
+				// score по близости количества %[N]s
+				seen := t.meta.percentSeen
+				diff := seen - len(it.sliceVal)
+				if diff < 0 {
+					diff = -diff
+				}
+				if seen == len(it.sliceVal) {
+					sc = 1000 + seen // идеал
+				} else {
+					sc = 100 - diff // чем ближе — тем выше
+				}
+			}
+			if sc > bestScore {
+				bestScore = sc
+				bestIdx = i
+			}
+		}
+		if bestScore <= 0 {
+			return -1, 0
+		}
+		return bestIdx, bestScore
+	}
+
+	// Pass #1
+	waitZone := []int{}
+	for idx, it := range nitems {
+		// если уже есть биндинг на группу — используем его сразу
+		if it.groupKey != "" {
+			if b, ok := binding[it.groupKey]; ok {
+				assigned[idx] = b
+				buckets[b].items = append(buckets[b].items, idx)
+				continue
+			}
+		}
+
+		tplIdx, sc := tryMatch(it)
+		if sc > 0 {
+			assigned[idx] = tplIdx
+			buckets[tplIdx].items = append(buckets[tplIdx].items, idx)
+			// фиксируем биндинг для группы
+			if it.groupKey != "" {
+				binding[it.groupKey] = tplIdx
+			}
+		} else {
+			waitZone = append(waitZone, idx)
+		}
+	}
+
+	// Pass #2 — retry waitZone
+	if len(waitZone) > 0 {
+		for _, idx := range waitZone {
+			it := nitems[idx]
+			// если после первого прохода биндинг для группы появился — кидаем туда
+			if it.groupKey != "" {
+				if b, ok := binding[it.groupKey]; ok {
+					assigned[idx] = b
+					buckets[b].items = append(buckets[b].items, idx)
+					continue
+				}
+			}
+			// иначе ещё раз пробуем подобрать шаблон
+			tplIdx, sc := tryMatch(it)
+			if sc > 0 {
+				assigned[idx] = tplIdx
+				buckets[tplIdx].items = append(buckets[tplIdx].items, idx)
+				if it.groupKey != "" {
+					binding[it.groupKey] = tplIdx
+				}
+			} else {
+				// B-логика: не подошёл — пропускаем
+				assigned[idx] = -1
+			}
+		}
+	}
+
+	// Pass #3 — нормализация дырок внутри каждого bucket (union полей)
+	// unionFields[tplIdx] -> set of names seen in bucket for named rows
+	unionFields := make([]map[string]struct{}, len(templates))
+	for i := range unionFields {
+		unionFields[i] = make(map[string]struct{})
+	}
+	for tIdx, b := range buckets {
+		if !templates[tIdx].isNamed {
+			continue
+		}
+		for _, itemIdx := range b.items {
+			mv := nitems[itemIdx].mapVal
+			for k := range mv {
+				unionFields[tIdx][k] = struct{}{}
+			}
+		}
+	}
+
+	// 4) Генерация результата: HEADER + (по данным) + FOOTER
+	var outRows []string
+	if len(headerRows) > 0 {
+		outRows = append(outRows, headerRows...)
+	}
+
+	for i, it := range nitems {
+		tidx := assigned[i]
+		if tidx < 0 {
+			// skip
+			continue
+		}
+		t := templates[tidx]
+		if t.isPos {
+			outRows = append(outRows, renderPositional(t.xml, it.sliceVal))
+			continue
+		}
+		// named
+		outRows = append(outRows, renderNamedWithUnion(t.xml, t.meta, it.mapVal, unionFields[tidx]))
+	}
+
+	if len(footerRows) > 0 {
+		outRows = append(outRows, footerRows...)
+	}
+
+	return TableOpeningTag + strings.Join(outRows, "") + TableEndingTag, nil
+}
 
 func metaHasAnyKnown(meta tplMeta, known map[string]struct{}) bool {
 	for _, n := range meta.names {
@@ -253,25 +417,56 @@ func metaHasAnyKnown(meta tplMeta, known map[string]struct{}) bool {
 	return false
 }
 
-func findMatchingMap(meta tplMeta, queue []map[string]any) int {
-	for i, m := range queue {
-		for _, name := range meta.names {
-			if _, ok := m[name]; ok {
-				return i
+// collectLocalKeys вытаскивает имена локальных полей из входных items.
+// Смотрим {"group": { ... }} и плоские map[string]any без слайсов.
+func collectLocalKeys(items []any) map[string]struct{} {
+	keys := make(map[string]struct{})
+	for _, it := range items {
+		switch m := it.(type) {
+
+		case map[string]any:
+			// {"group": {...}} → берём ключи из inner map
+			if len(m) == 1 {
+				for _, v := range m {
+					if inner, ok := v.(map[string]any); ok {
+						for k := range inner {
+							keys[k] = struct{}{}
+						}
+					}
+				}
+				break
+			}
+
+			// плоский map без слайсов → тоже считаем локальными ключами
+			flat := true
+			for _, v := range m {
+				switch v.(type) {
+				case []any, []string:
+					flat = false
+				}
+			}
+			if flat {
+				for k := range m {
+					keys[k] = struct{}{}
+				}
 			}
 		}
 	}
-	return -1
+	return keys
 }
 
-// renderNamed:
-// 1) {name|mod...} → {{ `value` | mod... }}  (если name есть в data)
-// 2) {name}        → value (raw)             (если name есть в data)
-// 3) неизвестные теги оставляем как есть
-func renderNamed(xmlTpl string, meta tplMeta, data map[string]any) string {
+// ============================================================================
+// Rendering helpers
+// ============================================================================
+
+// L1/L2-bucket/L3-global/L4-leave реализация:
+// - если name в data → подставляем
+// - иначе если name присутствует в union (встречался в других item’ах bucket’а) → подставляем ""
+// - иначе оставляем как есть (глобальные теги обработает ExecuteTemplate)
+func renderNamedWithUnion(xmlTpl string, meta tplMeta, data map[string]any, union map[string]struct{}) string {
 	out := xmlTpl
 
-	// Сначала — {name|mod...}
+	// 1) {name|mod...}
 	reNameMod := regexp.MustCompile(`\{[ \t]*([A-Za-z0-9_.]+)[ \t]*\|([^}]*)}`)
 	out = reNameMod.ReplaceAllStringFunc(out, func(tok string) string {
 		m := reNameMod.FindStringSubmatch(tok)
@@ -280,67 +475,60 @@ func renderNamed(xmlTpl string, meta tplMeta, data map[string]any) string {
 		}
 		name := m[1]
 		modTail := strings.TrimSpace(m[2])
-		valAny, ok := data[name]
-		if !ok {
-			return tok // неизвестное имя — оставляем как есть
+		if valAny, ok := data[name]; ok {
+			val := fmt.Sprint(valAny)
+			return "{ `" + val + "` | " + modTail + " }"
 		}
-		val := fmt.Sprint(valAny)
-
-		// // Включить XML-экранирование при необходимости:
-		// val = xmlEscape(val)
-
-		// { `value` | modTail }
-		return "{ `" + val + "` | " + modTail + " }"
+		// L2 — если поле встречается в bucket → пустая строка через модификатор
+		if _, seen := union[name]; seen {
+			return "{ `` | " + modTail + " }"
+		}
+		// L3/L4 — оставляем как есть
+		return tok
 	})
 
-	// Затем — чистые {name}
+	// 2) Чистые {name}
 	for _, name := range meta.names {
-		valAny, ok := data[name]
-		if !ok {
-			continue // оставляем {name} как есть
-		}
-		val := fmt.Sprint(valAny)
-		// val = xmlEscape(val) // <- включить, если решишь экранировать
-
-		// заменяем только "чистые" {name} (без модификатора)
+		// чистые — это ровно { name } без пайпа
 		reExact := regexp.MustCompile(`\{[ \t]*` + regexp.QuoteMeta(name) + `[ \t]*\}`)
-		out = reExact.ReplaceAllString(out, val)
+		if valAny, ok := data[name]; ok {
+			val := fmt.Sprint(valAny)
+			out = reExact.ReplaceAllString(out, val)
+			continue
+		}
+		// L2 — если поле есть в union → ставим ""
+		if _, seen := union[name]; seen {
+			out = reExact.ReplaceAllString(out, "")
+		}
+		// иначе L3/L4 — оставить как есть
 	}
 
 	return out
 }
 
-// renderPositional:
-// 1) {`%[N]s ...`|mod} → {{ `resolved` | mod }}
-// 2) голые %[N]s       → текстовые подстановки (raw)
-// Паддинг пустыми строками при нехватке значений — встроен.
+// Positional:
+// 1) {`...%[N]s...`|mod} → { `resolved` | mod }
+// 2) голые %[N]s → текст
 func renderPositional(xmlTpl string, arr []any) string {
 	out := xmlTpl
 
-	// 1) {`...`|mod} с возможными %[N]s внутри backticks
 	reBacktickMod := regexp.MustCompile("(?s)\\{[ \\t]*`([^`]*)`[ \\t]*\\|([^}]*)}")
 	out = reBacktickMod.ReplaceAllStringFunc(out, func(tok string) string {
 		m := reBacktickMod.FindStringSubmatch(tok)
 		if len(m) != 3 {
 			return tok
 		}
-		rawInside := m[1] // может содержать %[N]s
+		rawInside := m[1]
 		modTail := strings.TrimSpace(m[2])
-
 		resolved := replacePerc(rawInside, arr)
-
-		// resolved = xmlEscape(resolved) // <- включить, если решишь экранировать
-		return "{{ `" + resolved + "` | " + modTail + " }}"
+		return "{ `" + resolved + "` | " + modTail + " }"
 	})
 
-	// 2) Оставшиеся %[N]s (вне модификаторных блоков) → текст
 	out = replacePerc(out, arr)
-
 	return out
 }
 
-// replacePerc — заменяет все %[N]s в строке значениями из arr.
-// Индексация 1-базная, при нехватке значений — пустая строка.
+// replacePerc — заменяет %[N]s в строке из arr (1-базная индексация).
 func replacePerc(s string, arr []any) string {
 	return rePerc.ReplaceAllStringFunc(s, func(tok string) string {
 		m := rePerc.FindStringSubmatch(tok)
@@ -352,9 +540,7 @@ func replacePerc(s string, arr []any) string {
 		if idx < 0 || idx >= len(arr) {
 			return ""
 		}
-		val := fmt.Sprint(arr[idx])
-		// val = xmlEscape(val) // <- включить, если решишь экранировать
-		return val
+		return fmt.Sprint(arr[idx])
 	})
 }
 
@@ -368,7 +554,7 @@ type tplMeta struct {
 }
 
 var (
-	// Имена: захватывает {fio}, {fio|...}, {dep.team}, {dep.team | ...}
+	// Имена: {fio}, {dep.team}, {fio|...}, {dep.team | ...}
 	reBraceName = regexp.MustCompile(`\{[ \t]*([A-Za-z0-9_.]+)[ \t]*[|}]`)
 	// Позиционные: %[N]s
 	rePerc = regexp.MustCompile(`%\[\s*(\d+)\s*]s`)
@@ -389,46 +575,59 @@ func parseTplMeta(rowXML string) tplMeta {
 }
 
 // ============================================================================
-// Data Extractors
+// Data normalization
 // ============================================================================
 
-func extractInnerMapAny(it any) (map[string]any, bool) {
-	if outer, ok := it.(map[string]any); ok {
-		if len(outer) == 1 {
-			for _, v := range outer {
-				if inner, ok := v.(map[string]any); ok {
-					return inner, true
+func normalizeItem(v any) normItem {
+	// первичный кейс: {"group": {...}} или {"group": []}
+	if outer, ok := v.(map[string]any); ok && len(outer) == 1 {
+		for gk, inner := range outer {
+			switch x := inner.(type) {
+			case map[string]any:
+				return normItem{raw: v, groupKey: gk, kind: "map", mapVal: x}
+			case map[string]string:
+				mv := make(map[string]any, len(x))
+				for k, vv := range x {
+					mv[k] = vv
 				}
-			}
-		}
-		// fallback: если в значениях нет массивов — считаем плоским map
-		for _, v := range outer {
-			switch v.(type) {
-			case []any, []string:
-				return nil, false
-			}
-		}
-		return outer, true
-	}
-	return nil, false
-}
-
-func extractInnerSliceAny(it any) ([]any, bool) {
-	if outer, ok := it.(map[string]any); ok && len(outer) == 1 {
-		for _, v := range outer {
-			switch x := v.(type) {
+				return normItem{raw: v, groupKey: gk, kind: "map", mapVal: mv}
 			case []any:
-				return x, true
+				return normItem{raw: v, groupKey: gk, kind: "slice", sliceVal: x}
 			case []string:
-				res := make([]any, len(x))
+				ss := make([]any, len(x))
 				for i := range x {
-					res[i] = x[i]
+					ss[i] = x[i]
 				}
-				return res, true
+				return normItem{raw: v, groupKey: gk, kind: "slice", sliceVal: ss}
 			}
 		}
 	}
-	return nil, false
+
+	// запасной вариант: плоский map (будем считать одноразовым map-item без явного groupKey)
+	if m, ok := v.(map[string]any); ok {
+		// если в значениях встречаются слайсы — не считаем map-item
+		for _, vv := range m {
+			switch vv.(type) {
+			case []any, []string:
+				return normItem{raw: v, kind: "other"}
+			}
+		}
+		return normItem{raw: v, kind: "map", mapVal: m}
+	}
+
+	// слайсы без обёртки — считаем positional item
+	if a, ok := v.([]any); ok {
+		return normItem{raw: v, kind: "slice", sliceVal: a}
+	}
+	if s, ok := v.([]string); ok {
+		ss := make([]any, len(s))
+		for i := range s {
+			ss[i] = s[i]
+		}
+		return normItem{raw: v, kind: "slice", sliceVal: ss}
+	}
+
+	return normItem{raw: v, kind: "other"}
 }
 
 // ============================================================================
@@ -456,10 +655,8 @@ func extractTableRows(tbl string) []string {
 	return rows
 }
 
-// XML-escape хук — по умолчанию выключен.
-// Оставляю, чтобы можно было легко включить в нужный момент.
-// минимальная XML-экранизация (вставляем в <w:t>)
 /*
+// XML-escape хук (по умолчанию выключен — мы отдаём в <w:t> raw, а строковые моды через Go-templates)
 func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")

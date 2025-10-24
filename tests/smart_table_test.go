@@ -88,7 +88,7 @@ func TestRenderSmartTable_PositionalInsideBackticks(t *testing.T) {
 		t.Fatalf("RenderSmartTable error: %v", err)
 	}
 
-	if !strings.Contains(got, "{{ `BBB` | abbr }}") {
+	if !strings.Contains(got, "{ `BBB` | abbr }") {
 		t.Fatalf("backticked placeholder should be substituted using next slice item: %s", got)
 	}
 
