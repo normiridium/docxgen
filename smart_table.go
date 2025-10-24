@@ -151,9 +151,9 @@ type tplMeta struct {
 
 var (
 	// Матчит только чистые {name} без модификаторов/бэктиков: {fio}, {pos}, {title}, {dep.team}
-	reBrace = regexp.MustCompile(`\{[ \t]*([A-Za-z0-9_\.]+)[ \t]*\}`)
+	reBrace = regexp.MustCompile(`\{[ \t]*([A-Za-z0-9_.]+)[ \t]*}`)
 	// Матчит %[N]s (включая случаи внутри бэктиков), чтобы строка считалась positional при наличии любого %[]
-	rePerc = regexp.MustCompile(`%\[\s*(\d+)\s*\]s`)
+	rePerc = regexp.MustCompile(`%\[\s*(\d+)\s*]s`)
 )
 
 func parseTplMeta(rowXML string) tplMeta {
