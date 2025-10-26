@@ -19,101 +19,23 @@ import (
 // paragraphStruct — минимальная структура для проверки параграфа
 type paragraphStruct struct {
 	XMLName xml.Name `xml:"p"`
-	R       struct {
+	R       []struct {
 		T string `xml:"t"`
 	} `xml:"r"`
 }
 
-// RepairTags — аккуратно чинит теги, если их порвал Word/LibreOffice на несколько <w:t>.
-// ВАЖНО: мы трогаем только содержимое между { и }, вырезая там служебные <w:t ...> и </w:t>,
-// остальной текст документа (включая кириллицу) не меняем.
-func (d *Docx) RepairTags(body string) (string, error) {
-	var b strings.Builder
-	inTag := false
-	i := 0
-	for i < len(body) {
-		if !inTag {
-			// Ожидаем открывающую скобку — начинаем режим «внутри тега»
-			if body[i] == '{' {
-				inTag = true
-				b.WriteByte('{')
-				i++
-				continue
-			}
-			b.WriteByte(body[i])
-			i++
-			continue
-		}
-
-		// Внутри тега: выпиливаем границы ран-ов Word
-		if strings.HasPrefix(body[i:], "<w:t") {
-			// пропускаем до '>'
-			j := strings.IndexByte(body[i:], '>')
-			if j < 0 {
-				// поломанный XML — просто дописываем хвост и выходим
-				b.WriteString(body[i:])
-				break
-			}
-			i += j + 1
-			continue
-		}
-		if strings.HasPrefix(body[i:], "</w:t>") {
-			i += len("</w:t>")
-			continue
-		}
-
-		// (опционально можно выкидывать и другие w:теги внутри фигурных,
-		// если вдруг офис порвёт сильнее)
-		if strings.HasPrefix(body[i:], "<w:") {
-			j := strings.IndexByte(body[i:], '>')
-			if j < 0 {
-				b.WriteString(body[i:])
-				break
-			}
-			i += j + 1
-			continue
-		}
-
-		// NB: специально перечисляем <w:t>, <w:r>, <w:rPr> —
-		// если убрать и схлопывать всё подряд "<w:", Word/LibreOffice
-		// могут порвать скобки так, что полетят лишние куски XML.
-		// Поэтому правила дублируют друг друга, но это осознанно.
-
-		if strings.HasPrefix(body[i:], "<w:r") || strings.HasPrefix(body[i:], "</w:r>") {
-			j := strings.IndexByte(body[i:], '>')
-			if j < 0 {
-				b.WriteString(body[i:])
-				break
-			}
-			i += j + 1
-			continue
-		}
-
-		if strings.HasPrefix(body[i:], "<w:rPr") || strings.HasPrefix(body[i:], "</w:rPr>") {
-			j := strings.IndexByte(body[i:], '>')
-			if j < 0 {
-				b.WriteString(body[i:])
-				break
-			}
-			i += j + 1
-			continue
-		}
-
-		// Закрывающая фигурная — выходим из режима
-		if body[i] == '}' {
-			inTag = false
-			b.WriteByte('}')
-			i++
-			continue
-		}
-
-		// Обычный символ внутри тега
-		b.WriteByte(body[i])
-		i++
+func (p *paragraphStruct) Text() string {
+	var parts []string
+	for _, r := range p.R {
+		parts = append(parts, r.T)
 	}
-
-	return b.String(), nil
+	return strings.Join(parts, "")
 }
+
+var replacer = strings.NewReplacer(
+	ParagraphOpeningTag+unwrapOpen, "",
+	unwrapClose+ParagraphClosingTag, "",
+)
 
 // ReplaceTagWithParagraph — удаляет параграф с тегом и возвращает обновлённый контент.
 // Используется как «unwrap»-механизм: параграф, содержащий тег, заменяется непосредственно контентом.
@@ -123,20 +45,14 @@ func ReplaceTagWithParagraph(body, tag, content string) string {
 		if strings.Contains(paragraph, tag) {
 			p := new(paragraphStruct)
 			_ = xml.Unmarshal([]byte(ParagraphOpeningTag+paragraph+ParagraphPartTag), p)
-			if strings.Contains(p.R.T, tag) {
-				// заменяем параграф на "якорь"
-				paragraphs[i] = tag + ClosingPartTag
+			text := p.Text()
+			if strings.Contains(text, tag) {
+				paragraphs[i] = unwrapOpen + strings.ReplaceAll(text, tag, content) + unwrapClose + ClosingPartTag
 			}
 		}
 	}
 
-	filtered := strings.Join(paragraphs, ParagraphPartTag)
-	replaced := strings.ReplaceAll(
-		filtered,
-		ParagraphOpeningTag+tag+ParagraphClosingTag,
-		content,
-	)
-	return replaced
+	return replacer.Replace(strings.Join(paragraphs, ParagraphPartTag))
 }
 
 // ProcessUnWrapParagraphTags — ищет все теги вида {*tag*}, вырезает параграф и превращает их в блочные {tag}.
@@ -157,6 +73,88 @@ func (d *Docx) ProcessUnWrapParagraphTags(body string) string {
 
 		body = ReplaceTagWithParagraph(body, starTag, normalized)
 	}
+}
+
+// RepairTags — аккуратно чинит теги, если их порвал Word/LibreOffice на несколько <w:t>.
+// ВАЖНО: мы трогаем только содержимое между { и }, вырезая там служебные <w:t ...> и </w:t>,
+// остальной текст документа (включая кириллицу) не меняем.
+func (d *Docx) RepairTags(body string) (string, error) {
+	var b strings.Builder
+	inCurly := false
+	inSquare := false
+	i := 0
+
+	for i < len(body) {
+		switch {
+		case !inCurly && !inSquare:
+			// ждём открывающую
+			if body[i] == '{' {
+				inCurly = true
+				b.WriteByte('{')
+				i++
+				continue
+			}
+			if body[i] == '[' {
+				inSquare = true
+				b.WriteByte('[')
+				i++
+				continue
+			}
+			b.WriteByte(body[i])
+			i++
+
+		case inCurly || inSquare:
+			// чистим XML внутри тега
+			switch {
+			case strings.HasPrefix(body[i:], "<w:t"):
+				j := strings.IndexByte(body[i:], '>')
+				if j < 0 {
+					b.WriteString(body[i:])
+					return b.String(), nil
+				}
+				i += j + 1
+				continue
+			case strings.HasPrefix(body[i:], "</w:t>"),
+				strings.HasPrefix(body[i:], "</w:r>"),
+				strings.HasPrefix(body[i:], "</w:rPr>"):
+				if idx := strings.IndexByte(body[i:], '>'); idx >= 0 {
+					i += idx + 1
+					continue
+				}
+				b.WriteString(body[i:])
+				return b.String(), nil
+			case strings.HasPrefix(body[i:], "<w:r"),
+				strings.HasPrefix(body[i:], "<w:rPr"),
+				strings.HasPrefix(body[i:], "<w:"):
+				if idx := strings.IndexByte(body[i:], '>'); idx >= 0 {
+					i += idx + 1
+					continue
+				}
+				b.WriteString(body[i:])
+				return b.String(), nil
+			}
+
+			// закрывающая скобка
+			if inCurly && body[i] == '}' {
+				inCurly = false
+				b.WriteByte('}')
+				i++
+				continue
+			}
+			if inSquare && body[i] == ']' {
+				inSquare = false
+				b.WriteByte(']')
+				i++
+				continue
+			}
+
+			// обычный символ внутри тега
+			b.WriteByte(body[i])
+			i++
+		}
+	}
+
+	return b.String(), nil
 }
 
 // ResolveIncludes — находит все [include/...] и подставляет нужный фрагмент.

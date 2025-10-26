@@ -64,40 +64,40 @@ type ModifierMeta struct {
 
 // Встроенные модификаторы.
 // Count — это число "фиксированных" параметров модификатора (идут перед pipeline-value в шаблоне).
-// wrapModifier сам разложит и вызовет функцию в сигнатуре вида: fn(value, fixed..., formats...)
+// WrapModifier сам разложит и вызовет функцию в сигнатуре вида: fn(value, fixed..., formats...)
 var builtins = map[string]ModifierMeta{
 	// string mods
-	"prefix":       {Fn: Prefix, Count: 1},       // func(value string, p string) string
-	"uniq_prefix":  {Fn: UniqPrefix, Count: 1},   // func(value string, p string) string
-	"postfix":      {Fn: Postfix, Count: 1},      // func(value string, p string) string
-	"uniq_postfix": {Fn: UniqPostfix, Count: 1},  // func(value string, p string) string
-	"default":      {Fn: DefaultValue, Count: 1}, // func(value string, def string) string
-	"filled":       {Fn: Filled, Count: 1},       // func(value any, out string) string
-	"replace":      {Fn: Replace, Count: 2},      // func(value string, old, new string) string
-	"truncate":     {Fn: Truncate, Count: 2},     // func(value string, n int, suffix string) string
-	"word_reverse": {Fn: WordReverse, Count: 0},  // func(value string) string
+	"prefix":       {Fn: Prefix, Count: 1},
+	"uniq_prefix":  {Fn: UniqPrefix, Count: 1},
+	"postfix":      {Fn: Postfix, Count: 1},
+	"uniq_postfix": {Fn: UniqPostfix, Count: 1},
+	"default":      {Fn: DefaultValue, Count: 1},
+	"filled":       {Fn: Filled, Count: 1},
+	"replace":      {Fn: Replace, Count: 2},
+	"truncate":     {Fn: Truncate, Count: 2},
+	"word_reverse": {Fn: WordReverse, Count: 0},
 
 	// text mods
-	"nowrap":   {Fn: Nowrap, Count: 0},  // func(value string) string
-	"compact":  {Fn: Compact, Count: 0}, // func(value string) string
-	"abbr":     {Fn: Abbr, Count: 0},    // func(value string) string
-	"ru_phone": {Fn: RuPhone, Count: 0}, // func(value string, formats ...string) string
+	"nowrap":   {Fn: Nowrap, Count: 0},
+	"compact":  {Fn: Compact, Count: 0},
+	"abbr":     {Fn: Abbr, Count: 0},
+	"ru_phone": {Fn: RuPhone, Count: 0},
 
 	// numeric mods
-	"numeral":   {Fn: Numeral, Count: 0},  // func(value any, opts ...any) string (или твоя реальная сигнатура)
-	"plural":    {Fn: Plural, Count: 0},   // func(value any, forms ...string) string
-	"sign":      {Fn: Sign, Count: 0},     // func(value any) string
-	"pad_left":  {Fn: PadLeft, Count: 2},  // func(value string, width int, pad string) string
-	"pad_right": {Fn: PadRight, Count: 2}, // func(value string, width int, pad string) string
-	"money":     {Fn: Money, Count: 0},    // func(value any) string
-	"roman":     {Fn: Roman, Count: 0},    // func(value any) string
+	"numeral":   {Fn: Numeral, Count: 0},
+	"plural":    {Fn: Plural, Count: 0},
+	"sign":      {Fn: Sign, Count: 0},
+	"pad_left":  {Fn: PadLeft, Count: 2},
+	"pad_right": {Fn: PadRight, Count: 2},
+	"money":     {Fn: Money, Count: 1},
+	"roman":     {Fn: Roman, Count: 0},
 
 	// declension mods
-	"decl":       {Fn: Declension, Count: 2}, // func(value any, caseName string, format string) string
-	"declension": {Fn: Declension, Count: 2},
+	"decl":       {Fn: Declension, Count: 1},
+	"declension": {Fn: Declension, Count: 1},
 
 	// date mods
-	"date_format": {Fn: DateFormat, Count: 1}, // func(value any, layout string) string
+	"date_format": {Fn: DateFormat, Count: 1},
 }
 
 // NewFuncMap возвращает карту функций для Go-шаблонов.
@@ -107,26 +107,26 @@ func NewFuncMap(opts Options) template.FuncMap {
 
 	// Регистрируем builtins с учётом количества фиксированных параметров
 	for name, meta := range builtins {
-		fm[name] = wrapModifier(meta.Fn, meta.Count)
+		fm[name] = WrapModifier(meta.Fn, meta.Count)
 	}
 
 	// concat — особый: нужен доступ к opts.Data; сигнатура: func(base string, parts ...string) string
 	// В шаблоне: {base|concat:`x`:`y`:`, `}
 	// Здесь Count=0: все параметры считаем "formats", они идут после value.
-	fm["concat"] = wrapModifier(ConcatFactory(opts.Data), 0)
+	fm["concat"] = WrapModifier(ConcatFactory(opts.Data), 0)
 
 	// p_split подключаем, если есть шрифты.
 	// Сигнатура замыкания: func(text string, firstUnders, otherUnders, nLine any, extra ...any) string
 	// В шаблоне: {text|p_split:20:65:2} или {text|p_split:20:65:+2:`bold`:12}
 	// Здесь Count=3 (firstUnders, otherUnders, nLine) — extra уйдут как variadic после них.
 	if opts.Fonts != nil {
-		fm["p_split"] = wrapModifier(MakePSplit(opts.Fonts), 3)
+		fm["p_split"] = WrapModifier(MakePSplit(opts.Fonts), 3)
 	}
 
 	// Мержим пользовательские модификаторы (полноценные участники DSL)
 	if opts.ExtraFuncs != nil {
 		for k, meta := range opts.ExtraFuncs {
-			fm[k] = wrapModifier(meta.Fn, meta.Count)
+			fm[k] = WrapModifier(meta.Fn, meta.Count)
 		}
 	}
 
@@ -178,14 +178,14 @@ func splitArgs(countFirst int, args []any) (values []any, formats []any, value a
 	return
 }
 
-// wrapModifier — единая обёртка вызова модификатора.
+// WrapModifier — единая обёртка вызова модификатора.
 // Делает разбор аргументов по правилу DSL: первые "fixed" — фиксированные, последний — pipeline-value,
 // всё между ними — "formats". Затем вызывает целевую функцию в виде:
 //
 //	fn(value, fixed..., formats...)
 //
 // Поддерживает вариадики.
-func wrapModifier(fn any, fixed int) any {
+func WrapModifier(fn any, fixed int) any {
 	return func(args ...any) any {
 		values, formats, value := splitArgs(fixed, args)
 

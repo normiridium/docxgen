@@ -37,4 +37,8 @@ const (
 
 	// Формат нормального параграфа (с текстом)
 	FormatNormalParagraph = `<w:p><w:pPr><w:pStyle w:val="Normal"/><w:bidi w:val="0"/><w:jc w:val="left"/><w:rPr></w:rPr></w:pPr><w:r><w:rPr></w:rPr><w:t>%s</w:t></w:r></w:p>`
+
+	// Пометка к снятию оборачивания xml-тегом
+	unwrapOpen  = "<unwrap>"
+	unwrapClose = "</unwrap>"
 )

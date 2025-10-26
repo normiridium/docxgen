@@ -12,7 +12,7 @@ func TestReplaceTagWithParagraph(t *testing.T) {
 
 	out := docxgen.ReplaceTagWithParagraph(body, "{tag}", "CONTENT")
 
-	if out != "<w:body>CONTENT</w:body>" {
+	if out != "<w:body>AAA CONTENT BBB</w:body>" {
 		t.Fatalf("should not unwrap when tag is not the only run: %s", out)
 	}
 }
