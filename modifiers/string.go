@@ -5,6 +5,16 @@ import (
 	"strings"
 )
 
+var (
+	// NewLineInText - Перенос строки внутри параграфа
+	NewLineInText = "</w:t><w:br/><w:t>"
+)
+
+// NewLine — добавить перенос к строке.
+func NewLine(s string) RawXML {
+	return RawXML(s + NewLineInText)
+}
+
 // Prefix — добавить префикс к строке, если она не пустая.
 //
 // Пример:

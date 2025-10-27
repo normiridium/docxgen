@@ -12,6 +12,9 @@ import (
 	"text/template"
 )
 
+// RawXML — тип для "сырых" XML-вставок, которые не нужно экранировать.
+type RawXML string
+
 // Options задаёт параметры построения FuncMap.
 type Options struct {
 	// Fonts — набор шрифтов для p_split. Если nil, p_split не подключаем.
@@ -76,6 +79,8 @@ var builtins = map[string]ModifierMeta{
 	"replace":      {Fn: Replace, Count: 2},
 	"truncate":     {Fn: Truncate, Count: 2},
 	"word_reverse": {Fn: WordReverse, Count: 0},
+	"br":           {Fn: NewLine, Count: 0},
+	"nl":           {Fn: NewLine, Count: 0},
 
 	// text mods
 	"nowrap":   {Fn: Nowrap, Count: 0},
@@ -98,6 +103,9 @@ var builtins = map[string]ModifierMeta{
 
 	// date mods
 	"date_format": {Fn: DateFormat, Count: 1},
+
+	// qrcode mod
+	"qrcode": {Fn: QrCode, Count: 0},
 }
 
 // NewFuncMap возвращает карту функций для Go-шаблонов.
@@ -257,6 +265,12 @@ func WrapModifier(fn any, fixed int) any {
 // - один любой → как есть
 // - несколько → []any
 func normalizeReturn(out []reflect.Value) any {
+	// если модификатор вернул RawXML — вставляем как есть
+	if len(out) == 1 && out[0].IsValid() {
+		if raw, ok := out[0].Interface().(RawXML); ok {
+			return string(raw)
+		}
+	}
 	if len(out) == 1 && out[0].IsValid() && out[0].Kind() == reflect.String {
 		if safe, err := escapeForWord(out[0].String()); err == nil {
 			return safe

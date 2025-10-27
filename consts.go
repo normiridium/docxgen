@@ -23,9 +23,6 @@ const (
 	// Общий закрывающий маркер
 	ClosingPartTag = "</"
 
-	// Перенос строки внутри параграфа
-	NewLineInText = "</w:t><w:br/><w:t>"
-
 	// Пустой параграф
 	EmptyParagraph = "<w:p></w:p>"
 
