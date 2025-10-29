@@ -226,7 +226,7 @@ func (d *Docx) getIncludeXML(spec BracketIncludeSpec) (xmlFragment string, isTab
 	if err != nil {
 		return "", false, fmt.Errorf("include open %q: %w", spec.File, err)
 	}
-	doc, err := child.Content()
+	doc, err := child.ContentPart("document")
 	if err != nil {
 		return "", false, fmt.Errorf("include %q: document.xml not found", spec.File)
 	}

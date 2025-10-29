@@ -35,11 +35,6 @@ func TestDocxgenEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open temp docx: %v", err)
 	}
-	defer func() {
-		if cerr := doc.Close(); cerr != nil {
-			t.Errorf("failed to close temp docx: %v", cerr)
-		}
-	}()
 
 	// выполняем шаблон
 	data := map[string]any{"fio": "Иванов Иван Иванович"}
@@ -52,21 +47,18 @@ func TestDocxgenEndToEnd(t *testing.T) {
 	if err := doc.Save(out); err != nil {
 		t.Fatalf("failed to save output docx: %v", err)
 	}
-	defer os.Remove(out)
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(out)
 
 	// повторно открываем
 	doc, err = docxgen.Open(out)
 	if err != nil {
 		t.Fatalf("failed to open output docx: %v", err)
 	}
-	defer func() {
-		if cerr := doc.Close(); cerr != nil {
-			t.Errorf("failed to close output docx: %v", cerr)
-		}
-	}()
 
 	// читаем контент
-	testStr, err := doc.Content()
+	testStr, err := doc.ContentPart("document")
 	if err != nil {
 		t.Fatalf("failed to extract content from output docx: %v", err)
 	}

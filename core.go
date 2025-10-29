@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"text/template"
@@ -49,12 +50,22 @@ func (m *sharedMedia) ForEach(fn func(name string, data []byte)) {
 
 // Docx представляет собой распакованный DOCX-документ
 // и предоставляет API для чтения, модификации и повторной упаковки.
+//
+// Поля структуры:
+//   - files — все файлы из архива (xml, styles, media и т.п.);
+//   - localMedia — вложения, добавленные внутри текущего экземпляра;
+//   - sourcePath — исходный путь к шаблону;
+//   - extraFuncs — дополнительные зарегистрированные модификаторы;
+//   - fonts — набор шрифтов (для p_split и подобных операций);
+//   - activePart — текущий редактируемый раздел документа ("document", "header1", "footer1" и т.д.).
+//     ⚠️ Не потокобезопасно — нельзя менять в нескольких горутинах одновременно.
 type Docx struct {
-	files      map[string][]byte                 // все файлы из архива (xml, styles, media, etc.)
-	localMedia map[string][]byte                 // вложения, добавленные внутри экземпляра
-	sourcePath string                            // исходный путь к шаблону
-	extraFuncs map[string]modifiers.ModifierMeta // дополнительные модификаторы
-	fonts      *metrics.FontSet                  // набор шрифтов (для p_split и подобных)
+	files      map[string][]byte
+	localMedia map[string][]byte
+	sourcePath string
+	extraFuncs map[string]modifiers.ModifierMeta
+	fonts      *metrics.FontSet
+	activePart string
 }
 
 //
@@ -97,7 +108,7 @@ func Open(path string) (*Docx, error) {
 	}
 
 	// Восстанавливаем сломанные теги, чтобы шаблон можно было интерпретировать корректно.
-	body, err := doc.Content()
+	body, err := doc.ContentPart("document")
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +119,7 @@ func Open(path string) (*Docx, error) {
 	}
 
 	body = doc.ProcessUnWrapParagraphTags(body)
-	doc.UpdateContent(body)
+	doc.UpdateContentPart("document", body)
 
 	return doc, nil
 }
@@ -119,15 +130,34 @@ func (d *Docx) Save(path string) error {
 	writer := zip.NewWriter(buffer)
 
 	// 1. Объединяем все медиафайлы в единую карту
-	var mediaNames []string
+	// mediaByPart — хранит файлы для разных частей документа
+	mediaByPart := map[string][]string{}
 	globalMedia.ForEach(func(filename string, data []byte) {
 		d.files[filename] = data
-		mediaNames = append(mediaNames, strings.TrimPrefix(filename, "word/media/"))
+
+		mediaName := strings.TrimPrefix(filename, "word/media/")
+		// имя секции кодируем в имени файла, например:
+		//   word/media/document_abc.png
+		//   word/media/footer1_xyz.png
+		//   word/media/header2_zzz.png
+		parts := strings.SplitN(mediaName, "_", 2)
+		part := "document" // по умолчанию
+
+		if len(parts) > 1 {
+			switch {
+			case strings.HasPrefix(parts[0], "header"):
+				part = parts[0]
+			case strings.HasPrefix(parts[0], "footer"):
+				part = parts[0]
+			}
+		}
+
+		mediaByPart[part] = append(mediaByPart[part], mediaName)
 	})
 
 	// 2. Обновляем rels и [Content_Types].xml
-	if len(mediaNames) > 0 {
-		d.updateMediaRelationships(mediaNames)
+	for part, names := range mediaByPart {
+		d.updateMediaRelationships(part, names)
 	}
 
 	// 3. Создаём ZIP-архив
@@ -182,18 +212,79 @@ func (d *Docx) SetFile(name string, data []byte) {
 	}
 }
 
-// Content возвращает основной XML тела документа (word/document.xml).
-func (d *Docx) Content() (string, error) {
-	data, ok := d.files["word/document.xml"]
+// ContentPart возвращает XML тела документа, хедера или футера.
+func (d *Docx) ContentPart(part string) (string, error) {
+	d.activePart = part
+
+	if !strings.HasPrefix(part, "word/") {
+		part = "word/" + part
+	}
+	if !strings.HasSuffix(part, ".xml") {
+		part += ".xml"
+	}
+	data, ok := d.files[part]
 	if !ok {
-		return "", fmt.Errorf("no document.xml in docx")
+		return "", fmt.Errorf("no %s in docx", part)
 	}
 	return string(data), nil
 }
 
-// UpdateContent заменяет содержимое документа (word/document.xml).
-func (d *Docx) UpdateContent(content string) {
-	d.files["word/document.xml"] = []byte(content)
+// UpdateContentPart заменяет XML указанного раздела.
+func (d *Docx) UpdateContentPart(part, content string) {
+	if !strings.HasPrefix(part, "word/") {
+		part = "word/" + part
+	}
+	if !strings.HasSuffix(part, ".xml") {
+		part += ".xml"
+	}
+	d.files[part] = []byte(content)
+}
+
+// ListHeaderFooterParts возвращает имена всех headerX и footerX файлов,
+// реально подключённых к документу через <w:headerReference> / <w:footerReference>.
+// ListHeaderFooterParts возвращает имена всех реально подключённых header*/footer* файлов.
+func (d *Docx) ListHeaderFooterParts() []string {
+	const (
+		docPath  = "word/document.xml"
+		relsPath = "word/_rels/document.xml.rels"
+	)
+	var parts []string
+
+	doc, ok1 := d.files[docPath]
+	rels, ok2 := d.files[relsPath]
+	if !ok1 || !ok2 {
+		return parts
+	}
+
+	// ищем r:id из <w:headerReference> / <w:footerReference>
+	re := regexp.MustCompile(`<w:(?:headerReference|footerReference)[^>]+r:id="([^"]+)"`)
+	ids := re.FindAllStringSubmatch(string(doc), -1)
+	if len(ids) == 0 {
+		return parts
+	}
+
+	type Relationship struct {
+		ID     string `xml:"Id,attr"`
+		Type   string `xml:"Type,attr"`
+		Target string `xml:"Target,attr"`
+	}
+	type Relationships struct {
+		XMLName xml.Name       `xml:"Relationships"`
+		Items   []Relationship `xml:"Relationship"`
+	}
+	var rel Relationships
+	_ = xml.Unmarshal(rels, &rel)
+
+	for _, id := range ids {
+		for _, r := range rel.Items {
+			if r.ID == id[1] &&
+				(strings.Contains(r.Type, "/header") || strings.Contains(r.Type, "/footer")) {
+				name := strings.TrimSuffix(filepath.Base(r.Target), ".xml")
+				parts = append(parts, name)
+			}
+		}
+	}
+	return parts
 }
 
 //
@@ -228,49 +319,57 @@ func (d *Docx) ImportBuiltins() {
 
 // ExecuteTemplate выполняет шаблон документа, используя переданные данные.
 func (d *Docx) ExecuteTemplate(data map[string]any) error {
-	body, err := d.Content()
-	if err != nil {
-		return fmt.Errorf("execute template: %w", err)
+	parts := d.ListHeaderFooterParts()
+	parts = append(parts, "document")
+	for _, part := range parts {
+		content, err := d.ContentPart(part)
+		if err != nil {
+			if part == "document" {
+				return fmt.Errorf("execute template: %w", err)
+			} else {
+				continue
+			}
+		}
+
+		if content, err = d.RepairTags(content); err != nil {
+			return fmt.Errorf("repair tags (initial): %w", err)
+		}
+
+		content = d.ResolveIncludes(content)
+		content = d.ResolveTables(content, data)
+
+		if content, err = d.RepairTags(content); err != nil {
+			return fmt.Errorf("repair tags (after includes): %w", err)
+		}
+
+		content = d.ProcessUnWrapParagraphTags(content)
+		content = d.ProcessTrimTags(content)
+
+		// Преобразуем теги {var|mod} в {{ .var | mod }}
+		content = TransformTemplate(content)
+
+		d.ImportBuiltins()
+		funcMap := modifiers.NewFuncMap(modifiers.Options{
+			Fonts:      d.fonts,
+			Data:       data,
+			ExtraFuncs: d.extraFuncs,
+		})
+
+		tmpl, err := template.New("docx").
+			Delims("{", "}").
+			Funcs(funcMap).
+			Parse(content)
+		if err != nil {
+			return fmt.Errorf("parse template: %w", err)
+		}
+
+		var out bytes.Buffer
+		if err := tmpl.Execute(&out, data); err != nil {
+			return fmt.Errorf("execute template: %w", err)
+		}
+
+		d.UpdateContentPart(part, out.String())
 	}
-
-	if body, err = d.RepairTags(body); err != nil {
-		return fmt.Errorf("repair tags (initial): %w", err)
-	}
-
-	body = d.ResolveIncludes(body)
-	body = d.ResolveTables(body, data)
-
-	if body, err = d.RepairTags(body); err != nil {
-		return fmt.Errorf("repair tags (after includes): %w", err)
-	}
-
-	body = d.ProcessUnWrapParagraphTags(body)
-	body = d.ProcessTrimTags(body)
-
-	// Преобразуем теги {var|mod} в {{ .var | mod }}
-	body = TransformTemplate(body)
-
-	d.ImportBuiltins()
-	funcMap := modifiers.NewFuncMap(modifiers.Options{
-		Fonts:      d.fonts,
-		Data:       data,
-		ExtraFuncs: d.extraFuncs,
-	})
-
-	tmpl, err := template.New("docx").
-		Delims("{", "}").
-		Funcs(funcMap).
-		Parse(body)
-	if err != nil {
-		return fmt.Errorf("parse template: %w", err)
-	}
-
-	var out bytes.Buffer
-	if err := tmpl.Execute(&out, data); err != nil {
-		return fmt.Errorf("execute template: %w", err)
-	}
-
-	d.UpdateContent(out.String())
 	return nil
 }
 
@@ -309,7 +408,7 @@ func (d *Docx) LoadFontsForPSplit(pathRegular, pathBold, pathItalic, pathBoldIta
 // AddImageRel добавляет изображение и возвращает его rId + базовое имя.
 func (d *Docx) AddImageRel(data []byte) (string, string) {
 	hash := sha1.Sum(data)
-	base := fmt.Sprintf("%x", hash)
+	base := fmt.Sprintf("%s_%x", d.activePart, hash)
 	filename := base + ".png"
 	rId := "rId_" + base
 
@@ -318,8 +417,8 @@ func (d *Docx) AddImageRel(data []byte) (string, string) {
 }
 
 // updateMediaRelationships обновляет связи (rels) и MIME-типы для набора медиафайлов.
-func (d *Docx) updateMediaRelationships(filenames []string) {
-	const relsPath = "word/_rels/document.xml.rels"
+func (d *Docx) updateMediaRelationships(part string, filenames []string) {
+	var relsPath = fmt.Sprintf("word/_rels/%s.xml.rels", part)
 
 	// читаем или создаём <Relationships>
 	relsData, _ := d.GetFile(relsPath)
