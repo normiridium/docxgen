@@ -1,12 +1,11 @@
 package docxgen
 
 import (
-	"bytes"
-	"encoding/xml"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -17,37 +16,44 @@ import (
 //  Раздел: Обработка параграфов и маркеров Word XML
 // ============================================================================
 
-// ReplaceTagWithParagraph — заменяет параграф, содержащий {tag}, на произвольный XML-фрагмент.
-// Используется для "unwrap"-механизма и вставки таблиц/фрагментов без лишнего <w:p>.
+// ReplaceTagWithParagraph — заменяет параграф, содержащий {tag}, на XML-фрагмент.
+// Если тег был единственным содержимым — параграф просто вырезается.
+// Если в параграфе был текст до или после тега, они превращаются в отдельные <w:p>.
 func ReplaceTagWithParagraph(body, tag, content string) string {
+	const (
+		openTag  = "<w:p>"
+		closeTag = "</w:p>"
+	)
+
 	var out strings.Builder
 	pos := 0
 
 	for {
-		start := strings.Index(body[pos:], "<w:p>")
+		start := strings.Index(body[pos:], openTag)
 		if start < 0 {
 			out.WriteString(body[pos:])
 			break
 		}
 		start += pos
-
-		end := strings.Index(body[start:], "</w:p>")
+		end := strings.Index(body[start:], closeTag)
 		if end < 0 {
 			out.WriteString(body[pos:])
 			break
 		}
-		end += start + len("</w:p>")
+		end += start + len(closeTag)
 
 		paragraph := body[start:end]
 		text := extractParagraphText(paragraph)
 
+		// если тег не найден — просто копируем параграф
 		if !strings.Contains(text, tag) {
 			out.WriteString(body[pos:end])
 			pos = end
 			continue
 		}
 
-		// тег единственный в параграфе
+		// если в параграфе только тег — вставляем контент без обертки
+		// (никаких <w:p> вокруг)
 		if strings.TrimSpace(text) == tag {
 			out.WriteString(body[pos:start])
 			out.WriteString(content)
@@ -55,6 +61,7 @@ func ReplaceTagWithParagraph(body, tag, content string) string {
 			continue
 		}
 
+		// иначе делим текст на before/after и строим параграфы
 		before, after, _ := strings.Cut(text, tag)
 		out.WriteString(body[pos:start])
 
@@ -74,6 +81,7 @@ func ReplaceTagWithParagraph(body, tag, content string) string {
 
 		pos = end
 	}
+
 	return out.String()
 }
 
@@ -267,16 +275,25 @@ func GetBodyFragment(content string) (string, error) {
 	return b[0], nil
 }
 
+// GetTableN — получить n-ую таблицу (нумерация с 1)
 func GetTableN(content string, n int) (string, error) {
 	if n <= 0 {
 		return "", fmt.Errorf("include: bad table index")
 	}
+
 	parts := strings.Split(content, TablePartTag)
 	idx := n*2 - 1
 	if idx < 0 || idx >= len(parts) {
 		return "", fmt.Errorf("include: table %d not found", n)
 	}
-	return TableOpeningTag + parts[idx] + TablePartTag, nil
+
+	frag := TableOpeningTag + parts[idx] + TablePartTag
+
+	// ⚠️ обрезаем всё после конца таблицы (чтобы не захватывать sectPr)
+	if pos := strings.Index(frag, "</w:tbl>"); pos != -1 {
+		frag = frag[:pos+len("</w:tbl>")]
+	}
+	return frag, nil
 }
 
 func GetParagraphN(content string, n int) (string, error) {
@@ -373,285 +390,127 @@ func ParseBracketIncludeTag(tag string) (BracketIncludeSpec, error) {
 }
 
 // ============================================================================
-//  Раздел: TrimTags — структурное удаление пробелов по маркерам {~}, {-}
+// ProcessTrimTags — чистит {~} и {-} с учётом соседних <w:t> и корректных пробелов
 // ============================================================================
 
-// --- классификация пробелов -------------------------------------------------
-
-type wsKind int
-
-const (
-	wsNone       wsKind = iota // не пробельный узел
-	wsSpacesTabs               // только пробелы/табы
-	wsHasNewline               // есть переносы строк
-)
-
-// classifyWS — определяет тип пробельного узла <w:t>.
-func classifyWS(s string) wsKind {
-	if s == "\t" {
-		return wsSpacesTabs
-	}
-	if s == "\n" {
-		return wsHasNewline
-	}
-	// только пробелы и табы
-	if strings.IndexFunc(s, func(r rune) bool { return !(r == ' ' || r == '\t') }) == -1 {
-		return wsSpacesTabs
-	}
-	// только пробелы/табы/переносы
-	if strings.IndexFunc(s, func(r rune) bool { return !(r == ' ' || r == '\t' || r == '\n') }) == -1 {
-		if strings.ContainsRune(s, '\n') {
-			return wsHasNewline
-		}
-		return wsSpacesTabs
-	}
-	return wsNone
-}
-
-// --- маски обрезки ----------------------------------------------------------
-
-type trimSide int
-
-const (
-	trimNone trimSide = iota
-	trimST            // удалять пробелы и табы
-	trimSTN           // удалять пробелы, табы и переносы строк
-)
-
-// computeMasks — определяет маску удаления слева/справа по содержимому {тега}.
-func computeMasks(tagText string) (left, right trimSide) {
-	if strings.Contains(tagText, "{~") {
-		left = trimSTN
-	} else if strings.Contains(tagText, "{-") {
-		left = trimST
-	}
-	if strings.Contains(tagText, "~}") {
-		right = trimSTN
-	} else if strings.Contains(tagText, "-}") {
-		right = trimST
-	}
-	return
-}
-
-// canEat — можно ли удалить пробельный узел с учётом маски.
-func canEat(kind wsKind, side trimSide) bool {
-	if side == trimNone || kind == wsNone {
-		return false
-	}
-	if side == trimST {
-		return kind == wsSpacesTabs
-	}
-	return kind == wsSpacesTabs || kind == wsHasNewline
-}
-
-// stripMarkersInPlace — превращает {~...~}, {-...-}, {~...}, {...~}, {-...}, {...-} → {...}.
-func stripMarkersInPlace(s string) string {
-	s = strings.ReplaceAll(s, "{~", "{")
-	s = strings.ReplaceAll(s, "{-", "{")
-	s = strings.ReplaceAll(s, "~}", "}")
-	s = strings.ReplaceAll(s, "-}", "}")
-	return s
-}
-
-// --- структуры Word XML -----------------------------------------------------
-
-type textStruct struct {
-	XMLName xml.Name `xml:"t"`
-	Text    string   `xml:",chardata"`
-}
-
-type runStruct struct {
-	XMLName xml.Name     `xml:"r"`
-	Texts   []textStruct `xml:"t"`
-	Tabs    []struct{}   `xml:"tab"`
-	Breaks  []struct{}   `xml:"br"`
-}
-
-type paragraphStruct struct {
-	XMLName xml.Name    `xml:"p"`
-	Runs    []runStruct `xml:"r"`
-}
-
-// MarshalXML — сериализация <w:p> с сохранением префикса w:.
-func (p paragraphStruct) MarshalXML(e *xml.Encoder, _ xml.StartElement) error {
-	start := xml.StartElement{Name: xml.Name{Local: "w:p"}}
-	if err := e.EncodeToken(start); err != nil {
-		return err
-	}
-	for _, r := range p.Runs {
-		if err := encodeRun(e, r); err != nil {
-			return err
-		}
-	}
-	return e.EncodeToken(xml.EndElement{Name: start.Name})
-}
-
-// encodeRun — вспомогательная сериализация <w:r>.
-func encodeRun(e *xml.Encoder, r runStruct) error {
-	start := xml.StartElement{Name: xml.Name{Local: "w:r"}}
-	if err := e.EncodeToken(start); err != nil {
-		return err
-	}
-	for _, t := range r.Texts {
-		err := e.EncodeToken(xml.StartElement{Name: xml.Name{Local: "w:t"}})
-		if err != nil {
-			return err
-		}
-		err = e.EncodeToken(xml.CharData([]byte(t.Text)))
-		if err != nil {
-			return err
-		}
-		err = e.EncodeToken(xml.EndElement{Name: xml.Name{Local: "w:t"}})
-		if err != nil {
-			return err
-		}
-	}
-	for range r.Tabs {
-		err := e.EncodeToken(xml.StartElement{Name: xml.Name{Local: "w:tab"}})
-		if err != nil {
-			return err
-		}
-		err = e.EncodeToken(xml.EndElement{Name: xml.Name{Local: "w:tab"}})
-		if err != nil {
-			return err
-		}
-	}
-	for range r.Breaks {
-		err := e.EncodeToken(xml.StartElement{Name: xml.Name{Local: "w:br"}})
-		if err != nil {
-			return err
-		}
-		err = e.EncodeToken(xml.EndElement{Name: xml.Name{Local: "w:br"}})
-		if err != nil {
-			return err
-		}
-	}
-	return e.EncodeToken(xml.EndElement{Name: start.Name})
-}
-
-// dropTextAt — удаляет i-й элемент из списка текстов.
-func dropTextAt(texts []textStruct, i int) []textStruct {
-	copy(texts[i:], texts[i+1:])
-	return texts[:len(texts)-1]
-}
-
-// --- основная логика --------------------------------------------------------
-
-// ProcessTrimTags — проход по абзацам и удаление пробелов вокруг {~}/{-}.
-//
-// Алгоритм:
-//  1. заворачивает <w:tab/> и <w:br/> в текстовые узлы \t и \n,
-//  2. парсит <w:p> в структуру,
-//  3. для каждого <w:r> удаляет пробельные <w:t> вокруг тега,
-//  4. очищает сами теги от маркеров,
-//  5. собирает всё обратно в XML.
+// ProcessTrimTags — убирает пробелы, табы и переносы вокруг {~}/{-}, не ломая структуру Word.
 func (d *Docx) ProcessTrimTags(body string) string {
-	parts := strings.Split(body, ParagraphPartTag)
-	for i := 0; i < len(parts); i++ {
-		paraXML := ParagraphOpeningTag + parts[i] + ParagraphPartTag
+	// 1. Подмена спец-тегов на символы
+	body = strings.ReplaceAll(body, "<w:tab/>", "<w:t>\t</w:t>")
+	body = strings.ReplaceAll(body, "<w:br/>", "<w:t>\n</w:t>")
 
-		// пропускаем, если нет маркеров
-		if !hasAnyTrimMarkers(paraXML) {
-			continue
-		}
-
-		// локально оборачиваем табы/переносы в текст
-		wrapped := wrapTabsBreaksInParagraph(paraXML)
-
-		var p paragraphStruct
-		if err := xml.Unmarshal([]byte(wrapped), &p); err != nil {
-			continue
-		}
-
-		for ri := range p.Runs {
-			r := &p.Runs[ri]
-			if len(r.Texts) == 0 {
-				continue
-			}
-
-			ti := 0
-			for ti < len(r.Texts) {
-				txt := r.Texts[ti].Text
-
-				if !(strings.Contains(txt, "{~") ||
-					strings.Contains(txt, "~}") ||
-					strings.Contains(txt, "{-") ||
-					strings.Contains(txt, "-}")) {
-					ti++
-					continue
-				}
-
-				leftMask, rightMask := computeMasks(txt)
-
-				// влево
-				li := ti - 1
-				for li >= 0 {
-					if !canEat(classifyWS(r.Texts[li].Text), leftMask) {
-						break
-					}
-					r.Texts = dropTextAt(r.Texts, li)
-					ti--
-					li--
-				}
-
-				// вправо
-				ri2 := ti + 1
-				for ri2 < len(r.Texts) {
-					if !canEat(classifyWS(r.Texts[ri2].Text), rightMask) {
-						break
-					}
-					r.Texts = dropTextAt(r.Texts, ri2)
-				}
-
-				r.Texts[ti].Text = stripMarkersInPlace(r.Texts[ti].Text)
-				ti++
-			}
-		}
-
-		var buf bytes.Buffer
-		enc := xml.NewEncoder(&buf)
-		_ = enc.Encode(&p)
-		out := strings.TrimSpace(strings.TrimPrefix(buf.String(), xml.Header))
-		out = unwrapTabsBreaksInXML(out)
-
-		if strings.HasPrefix(out, ParagraphOpeningTag) && strings.HasSuffix(out, ParagraphPartTag) {
-			out = strings.TrimPrefix(out, ParagraphOpeningTag)
-			out = strings.TrimSuffix(out, ParagraphPartTag)
-			parts[i] = out
-		} else {
-			parts[i] = strings.TrimPrefix(wrapped, ParagraphOpeningTag)
-			parts[i] = strings.TrimSuffix(parts[i], ParagraphPartTag)
-		}
+	// 2. Разбиваем на параграфы
+	parts := strings.Split(body, "<w:p>")
+	if len(parts) == 1 {
+		return body // нет параграфов
 	}
-	return strings.Join(parts, ParagraphPartTag)
+
+	for i := 1; i < len(parts); i++ {
+		p := parts[i]
+		end := strings.Index(p, "</w:p>")
+		if end == -1 {
+			continue
+		}
+		content := p[:end]
+
+		// фильтр: чистим только если в параграфе есть {~ или {-
+		if !strings.Contains(content, "{~") && !strings.Contains(content, "{-") &&
+			!strings.Contains(content, "~}") && !strings.Contains(content, "-}") {
+			continue
+		}
+
+		// 3. Работаем внутри параграфа как раньше — построчно по <w:r>
+		reRun := regexp.MustCompile(`(?s)<w:r>.*?</w:r>`)
+		content = reRun.ReplaceAllStringFunc(content, func(run string) string {
+			reT := regexp.MustCompile(`(?s)<w:t[^>]*>.*?</w:t>`)
+			partsT := reT.FindAllString(run, -1)
+			if len(partsT) == 0 {
+				return run
+			}
+
+			var buf strings.Builder
+			for _, p := range partsT {
+				buf.WriteString(extractText(p))
+			}
+			clean := cleanTrimTags(buf.String())
+
+			// 4. Восстанавливаем спец-теги, не ломая структуру XML
+			var out strings.Builder
+			out.WriteString("<w:r>")
+			out.WriteString("<w:t>")
+
+			open := true
+			for i, r := range clean {
+				switch r {
+				case '\t':
+					if open {
+						out.WriteString("</w:t>")
+						open = false
+					}
+					out.WriteString("<w:tab/>")
+					if i < len(clean)-1 {
+						out.WriteString("<w:t>")
+						open = true
+					}
+				case '\n':
+					if open {
+						out.WriteString("</w:t>")
+						open = false
+					}
+					out.WriteString("<w:br/>")
+					if i < len(clean)-1 {
+						out.WriteString("<w:t>")
+						open = true
+					}
+				default:
+					if !open {
+						out.WriteString("<w:t>")
+						open = true
+					}
+					out.WriteRune(r)
+				}
+			}
+			if open {
+				out.WriteString("</w:t>")
+			}
+			out.WriteString("</w:r>")
+			return out.String()
+		})
+
+		parts[i] = content + p[end:]
+	}
+
+	return strings.Join(parts, "<w:p>")
 }
 
-// ============================================================================
-//  Раздел: вспомогательные утилиты XML
-// ============================================================================
-
-// hasAnyTrimMarkers — быстрый фильтр: стоит ли вообще разбирать параграф.
-func hasAnyTrimMarkers(s string) bool {
-	return strings.Contains(s, "{~") ||
-		strings.Contains(s, "~}") ||
-		strings.Contains(s, "{-") ||
-		strings.Contains(s, "-}")
-}
-
-// wrapTabsBreaksInParagraph — оборачивает <w:tab/> и <w:br/> в текст,
-// чтобы не потерять их при Unmarshal.
-func wrapTabsBreaksInParagraph(pXML string) string {
-	pXML = strings.ReplaceAll(pXML, "<w:tab/>", "<w:t>\t</w:t>")
-	pXML = strings.ReplaceAll(pXML, "<w:br/>", "<w:t>\n</w:t>")
-	return pXML
-}
-
-// unwrapTabsBreaksInXML — обратная операция после marshal:
-// возвращает \t → <w:tab/>, \n → <w:br/>.
-func unwrapTabsBreaksInXML(s string) string {
-	s = strings.ReplaceAll(s, `<w:t>`+"\t"+`</w:t>`, "<w:tab/>")
-	s = strings.ReplaceAll(s, `<w:t>`+"\n"+`</w:t>`, "<w:br/>")
-	s = strings.ReplaceAll(s, `<w:t>&#x9;</w:t>`, "<w:tab/>")
-	s = strings.ReplaceAll(s, `<w:t>&#xA;</w:t>`, "<w:br/>")
+// cleanTrimTags — удаляет пробелы, табы и переносы вокруг {~}/{-}, корректируя пробелы.
+func cleanTrimTags(s string) string {
+	// {~...~} — ест всё
+	s = regexp.MustCompile(`[\s]*\{~`).ReplaceAllString(s, "{")
+	s = regexp.MustCompile(`~}[\s]*`).ReplaceAllString(s, "}")
+	// {-...-} — ест только пробелы и табы
+	s = regexp.MustCompile(`[ \t]*\{-`).ReplaceAllString(s, "{")
+	s = regexp.MustCompile(`-}[ \t]*`).ReplaceAllString(s, "}")
+	// убираем маркеры
+	s = strings.ReplaceAll(s, "{~", "{")
+	s = strings.ReplaceAll(s, "~}", "}")
+	s = strings.ReplaceAll(s, "{-", "{")
+	s = strings.ReplaceAll(s, "-}", "}")
+	// восстанавливаем пробел перед тегом
+	s = regexp.MustCompile(`([A-Za-zА-Яа-яЁё])\{`).ReplaceAllString(s, `$1 {`)
 	return s
+}
+
+// extractText — достаёт текст из <w:t ...>...</w:t>.
+func extractText(xml string) string {
+	start := strings.Index(xml, ">")
+	if start == -1 {
+		return ""
+	}
+	end := strings.Index(xml[start:], "</w:t>")
+	if end == -1 {
+		return ""
+	}
+	end += start
+	return xml[start+1 : end]
 }
