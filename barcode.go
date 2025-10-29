@@ -148,8 +148,12 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 	// ---------- масштабируем ----------
 	if sizeHMM <= 0 {
 		sizeHMM = sizeWMM / 3
+		img, _ = barcode.Scale(img, int(sizeWMM*12), int(sizeHMM*12))
+	} else {
+		// если задано явно — оставляем исходный баркод,
+		// чтобы сохранить чёткость и не ломать aspect ratio
+		img, _ = barcode.Scale(img, img.Bounds().Dx(), img.Bounds().Dy())
 	}
-	img, _ = barcode.Scale(img, int(sizeWMM*12), int(sizeHMM*12))
 	buf, _ := encodePNG(img)
 	rId, base := d.AddImageRel(buf)
 

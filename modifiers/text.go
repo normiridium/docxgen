@@ -19,7 +19,7 @@ const (
 //
 // Пример:
 //
-//	{case_index|nowrap} → "Дело № 15"
+//	{case_index|nowrap} → "Дело № 15"
 func Nowrap(s string) string {
 	return strings.ReplaceAll(s, " ", NBSP)
 }
@@ -29,7 +29,7 @@ func Nowrap(s string) string {
 //
 // Пример:
 //
-//	{user_phone|compact} → "+7 (4912) 572-466"
+//	{user_phone|compact} → "+7 (4912) 572-466"
 func Compact(s string) string {
 	return strings.ReplaceAll(s, " ", NNBSP)
 }
@@ -39,9 +39,9 @@ func Compact(s string) string {
 //
 // Примеры:
 //
-//	"г. Москва" → "г. Москва"
-//	"И. И. Иванов" → "И. И. Иванов"
-//	"ООО Центр" → "ООО Центр"
+//	"г. Москва" → "г. Москва"
+//	"И. И. Иванов" → "И. И. Иванов"
+//	"ООО Центр" → "ООО Центр"
 func Abbr(s string) string {
 	// поддержка и кириллицы, и латиницы
 	re := regexp.MustCompile(`(?i)((?:(?:^|\s)[a-zа-яё.-]{1,5}\.?){1,2})\s+`)
