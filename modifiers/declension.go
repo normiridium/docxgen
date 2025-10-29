@@ -92,7 +92,6 @@ func Declension(v any, opts ...string) string {
 	return formatFIO(first, last, middle, format)
 }
 
-// petrovichCase — маппинг наших падежных сокращений на библиотечные константы.
 func petrovichCase(c string) petrovich.Case {
 	switch strings.ToLower(strings.TrimSpace(c)) {
 	case "род", "родительный", "gen", "р":
