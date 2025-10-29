@@ -46,11 +46,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("открытие DOCX: %v", err)
 	}
-	defer func() {
-		if err := doc.Close(); err != nil {
-			log.Printf("close doc: %v", err)
-		}
-	}()
 
 	// необязательно, но если есть модификатор p_split
 	if err := doc.LoadFontsForPSplit(

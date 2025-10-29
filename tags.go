@@ -251,7 +251,7 @@ func (d *Docx) openFragmentDoc(rel string) (*Docx, error) {
 	if ext != ".docx" && ext != ".dotx" {
 		return nil, fmt.Errorf("unsupported include extension: %s", rel)
 	}
-	base := filepath.Dir(d.filePath)
+	base := filepath.Dir(d.sourcePath)
 	full, err := securejoin.SecureJoin(base, rel)
 	if err != nil {
 		return nil, fmt.Errorf("forbidden include path: %w", err)

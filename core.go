@@ -12,142 +12,177 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 )
 
-var globalFiles = make(map[string][]byte)
-
-// Docx – основная структура, содержит файлы документа
-type Docx struct {
-	files       map[string][]byte                 // имя файла в архиве -> содержимое
-	globalFiles map[string][]byte                 // добавлено, для надёжного хранения вложений
-	filePath    string                            // путь к исходному файлу
-	extraFuncs  map[string]modifiers.ModifierMeta // сюда будем складывать кастомные модификаторы
-	fonts       *metrics.FontSet
+// sharedMedia — потокобезопасное хранилище медиафайлов (png, jpg и т.п.),
+// используемое всеми экземплярами Docx при генерации документов.
+type sharedMedia struct {
+	mu    sync.Mutex
+	files map[string][]byte
 }
 
-// Open – открыть docx как zip, считать все файлы и сразу починить теги
+// глобальный экземпляр
+var globalMedia = &sharedMedia{
+	files: make(map[string][]byte),
+}
+
+// AddAll — добавляет все файлы из другой карты в общий пул.
+func (m *sharedMedia) AddAll(from map[string][]byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, v := range from {
+		m.files[k] = v
+	}
+}
+
+// ForEach — выполняет действие для каждого файла в пуле.
+func (m *sharedMedia) ForEach(fn func(name string, data []byte)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, v := range m.files {
+		fn(k, v)
+	}
+}
+
+// Docx представляет собой распакованный DOCX-документ
+// и предоставляет API для чтения, модификации и повторной упаковки.
+type Docx struct {
+	files      map[string][]byte                 // все файлы из архива (xml, styles, media, etc.)
+	localMedia map[string][]byte                 // вложения, добавленные внутри экземпляра
+	sourcePath string                            // исходный путь к шаблону
+	extraFuncs map[string]modifiers.ModifierMeta // дополнительные модификаторы
+	fonts      *metrics.FontSet                  // набор шрифтов (для p_split и подобных)
+}
+
+//
+// ──────────────────────────── ОСНОВНЫЕ ОПЕРАЦИИ ────────────────────────────
+//
+
+// Open — открывает DOCX-файл, распаковывает его и подготавливает структуру.
 func Open(path string) (*Docx, error) {
-	r, err := zip.OpenReader(path)
+	reader, err := zip.OpenReader(path)
 	if err != nil {
 		return nil, fmt.Errorf("open docx: %w", err)
 	}
-	defer func(r *zip.ReadCloser) {
-		_ = r.Close()
-	}(r)
+	defer func(reader *zip.ReadCloser) {
+		_ = reader.Close()
+	}(reader)
 
 	files := make(map[string][]byte)
-	for _, f := range r.File {
-		rc, err := f.Open()
+	for _, file := range reader.File {
+		rc, err := file.Open()
 		if err != nil {
-			return nil, fmt.Errorf("read entry %s: %w", f.Name, err)
+			return nil, fmt.Errorf("read %s: %w", file.Name, err)
 		}
-		buf, err := io.ReadAll(rc)
-		_ = rc.Close() // только для чтения, можно не реагировать на ошибку закрытия
+		data, err := io.ReadAll(rc)
 		if err != nil {
-			return nil, fmt.Errorf("read entry %s: %w", f.Name, err)
+			return nil, fmt.Errorf("read %s: %w", file.Name, err)
 		}
-		files[f.Name] = buf
+
+		err = rc.Close()
+		if err != nil {
+			return nil, fmt.Errorf("close %s: %w", file.Name, err)
+		}
+
+		files[file.Name] = data
 	}
 
 	doc := &Docx{
-		files:    files,
-		filePath: path,
+		files:      files,
+		sourcePath: path,
+		localMedia: make(map[string][]byte),
 	}
 
-	modifiers.QrCodeFunc = func(value string, opts ...string) modifiers.RawXML {
-		d := doc.QrCode(value, opts...)
-		for k, v := range doc.globalFiles {
-			globalFiles[k] = v
-		}
-		return d
-	}
-
+	// Восстанавливаем сломанные теги, чтобы шаблон можно было интерпретировать корректно.
 	body, err := doc.Content()
 	if err != nil {
 		return nil, err
 	}
 
-	// сразу чиним теги и обрабатываем {*tag*}
-	repairBody, err := doc.RepairTags(body)
+	body, err = doc.RepairTags(body)
 	if err != nil {
 		return nil, fmt.Errorf("repair tags: %w", err)
 	}
 
-	// теги которые должны убрать оборачивание вокруг себя параграфом при вставке
-	repairBody = doc.ProcessUnWrapParagraphTags(repairBody)
-
-	doc.UpdateContent(repairBody)
+	body = doc.ProcessUnWrapParagraphTags(body)
+	doc.UpdateContent(body)
 
 	return doc, nil
 }
 
-// Save – сохранить все файлы обратно в новый docx
+// Save — записывает все файлы документа обратно в DOCX-архив.
 func (d *Docx) Save(path string) error {
-	buf := new(bytes.Buffer)
-	zw := zip.NewWriter(buf)
+	buffer := new(bytes.Buffer)
+	writer := zip.NewWriter(buffer)
 
-	// перед сохранением объединяем медиафайлы с основной картой
-	for k, v := range globalFiles {
-		d.files[k] = v
+	// 1. Объединяем все медиафайлы в единую карту
+	var mediaNames []string
+	globalMedia.ForEach(func(filename string, data []byte) {
+		d.files[filename] = data
+		mediaNames = append(mediaNames, strings.TrimPrefix(filename, "word/media/"))
+	})
 
-		name := strings.TrimPrefix(k, "word/media/")
-		ext := filepath.Ext(name)
-		base := strings.TrimSuffix(name, ext)
-		rId := "rId_" + base
-		d.UpdateRelsAndContentTypes(rId, name)
+	// 2. Обновляем rels и [Content_Types].xml
+	if len(mediaNames) > 0 {
+		d.updateMediaRelationships(mediaNames)
 	}
 
+	// 3. Создаём ZIP-архив
 	for name, data := range d.files {
-		// нормализуем имя (zip не любит абсолютные и обратные пути)
-		clean := strings.TrimPrefix(name, "/")
-		clean = strings.ReplaceAll(clean, "\\", "/")
-		clean = strings.TrimSpace(clean)
-		if clean == "" {
+		name = strings.TrimPrefix(name, "/")
+		name = strings.ReplaceAll(name, "\\", "/")
+		if strings.TrimSpace(name) == "" {
 			continue
 		}
 
-		// создаём entry вручную через FileHeader — zip сам добавит "виртуальные" каталоги
-		h := &zip.FileHeader{
-			Name:   clean,
-			Method: zip.Deflate,
+		header := &zip.FileHeader{
+			Name:     name,
+			Method:   zip.Deflate,
+			Modified: time.Now().UTC(),
 		}
-		// для Windows Word важно, чтобы дата не была "нулевой"
-		h.Modified = time.Now().UTC()
-
-		f, err := zw.CreateHeader(h)
+		writerFile, err := writer.CreateHeader(header)
 		if err != nil {
-			return fmt.Errorf("create entry %s: %w", clean, err)
+			return fmt.Errorf("create entry %s: %w", name, err)
 		}
-
-		if _, err := f.Write(data); err != nil {
-			return fmt.Errorf("write entry %s: %w", clean, err)
+		if _, err := writerFile.Write(data); err != nil {
+			return fmt.Errorf("write entry %s: %w", name, err)
 		}
 	}
 
-	if err := zw.Close(); err != nil {
+	if err := writer.Close(); err != nil {
 		return fmt.Errorf("close zip: %w", err)
 	}
-
-	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(path, buffer.Bytes(), 0644); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
 	return nil
 }
 
-// Close – на будущее, если будут ресурсы для освобождения
-func (d *Docx) Close() error {
-	return nil
-}
+//
+// ──────────────────────────── РАБОТА С XML ────────────────────────────
+//
 
-// GetFile – получить содержимое файла по имени (например word/document.xml)
+// GetFile возвращает содержимое файла из архива.
 func (d *Docx) GetFile(name string) ([]byte, bool) {
 	data, ok := d.files[name]
 	return data, ok
 }
 
-// Content – получить основной документ (word/document.xml)
+// SetFile обновляет или добавляет файл в документ.
+func (d *Docx) SetFile(name string, data []byte) {
+	name = strings.ReplaceAll(strings.TrimPrefix(name, "/"), "\\", "/")
+
+	if strings.HasPrefix(name, "word/media/") {
+		d.localMedia[name] = data
+	} else {
+		d.files[name] = data
+	}
+}
+
+// Content возвращает основной XML тела документа (word/document.xml).
 func (d *Docx) Content() (string, error) {
 	data, ok := d.files["word/document.xml"]
 	if !ok {
@@ -156,150 +191,140 @@ func (d *Docx) Content() (string, error) {
 	return string(data), nil
 }
 
-// UpdateContent – заменить основной документ
+// UpdateContent заменяет содержимое документа (word/document.xml).
 func (d *Docx) UpdateContent(content string) {
 	d.files["word/document.xml"] = []byte(content)
 }
 
-// ReplaceTag – заменить тег (поддерживает {tag} и {*tag*})
-func (d *Docx) ReplaceTag(tag, content string) error {
-	normalized := tag
-	if strings.HasPrefix(tag, "{*") && strings.HasSuffix(tag, "*}") {
-		normalized = "{" + strings.TrimSpace(tag[2:len(tag)-2]) + "}"
+//
+// ──────────────────────────── ТЕМПЛАТЫ И МОДИФИКАТОРЫ ────────────────────────────
+//
+
+// ImportBuiltins добавляет встроенные стандартные модификаторы
+// (qrcode, barcode и др.) через общий механизм ImportModifiers.
+func (d *Docx) ImportBuiltins() {
+	// добавляем QR сюда, чтобы несколько документов работали со своими данными, а globalMedia получал сведения о файлах
+	mods := map[string]modifiers.ModifierMeta{
+		"qrcode": {
+			Fn: func(value string, opts ...string) modifiers.RawXML {
+				xmlData := d.QrCode(value, opts...)
+				globalMedia.AddAll(d.localMedia)
+				return xmlData
+			},
+			Count: 0,
+		},
+		"barcode": {
+			Fn: func(value string, opts ...string) modifiers.RawXML {
+				xmlData := d.Barcode(value, opts...)
+				globalMedia.AddAll(d.localMedia)
+				return xmlData
+			},
+			Count: 0,
+		},
 	}
 
-	body, err := d.Content()
-	if err != nil {
-		return fmt.Errorf("replace tag: %w", err)
-	}
-
-	updated := strings.ReplaceAll(body, normalized, content)
-	d.UpdateContent(updated)
-	return nil
+	d.ImportModifiers(mods)
 }
 
-// ExecuteTemplate – обработка документа через Go templates
+// ExecuteTemplate выполняет шаблон документа, используя переданные данные.
 func (d *Docx) ExecuteTemplate(data map[string]any) error {
-
-	// 1) ещё раз чиним теги в случае, если include внёс новые разорванные <w:t>
 	body, err := d.Content()
 	if err != nil {
 		return fmt.Errorf("execute template: %w", err)
 	}
 
-	body, err = d.RepairTags(body)
-	if err != nil {
-		return fmt.Errorf("repair tags after include: %w", err)
+	if body, err = d.RepairTags(body); err != nil {
+		return fmt.Errorf("repair tags (initial): %w", err)
 	}
 
-	// 2) разворачиваем include перед шаблонизацией
 	body = d.ResolveIncludes(body)
-
 	body = d.ResolveTables(body, data)
 
-	body, err = d.RepairTags(body)
-	if err != nil {
-		return fmt.Errorf("repair tags after include: %w", err)
+	if body, err = d.RepairTags(body); err != nil {
+		return fmt.Errorf("repair tags (after includes): %w", err)
 	}
 
 	body = d.ProcessUnWrapParagraphTags(body)
 	body = d.ProcessTrimTags(body)
 
-	// 3) преобразуем {fio|declension:`genitive`} → {{ .fio | declension "genitive" }}
-	tmplSrc := TransformTemplate(body)
+	// Преобразуем теги {var|mod} в {{ .var | mod }}
+	body = TransformTemplate(body)
 
-	// 4) собираем FuncMap
-	fm := modifiers.NewFuncMap(modifiers.Options{
+	d.ImportBuiltins()
+	funcMap := modifiers.NewFuncMap(modifiers.Options{
 		Fonts:      d.fonts,
 		Data:       data,
 		ExtraFuncs: d.extraFuncs,
 	})
 
-	// 5) парсим Go-шаблон
 	tmpl, err := template.New("docx").
 		Delims("{", "}").
-		Funcs(fm).
-		Parse(tmplSrc)
+		Funcs(funcMap).
+		Parse(body)
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
 	}
 
-	// 6) выполняем Go-шаблон
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, data); err != nil {
 		return fmt.Errorf("execute template: %w", err)
 	}
 
-	// 7) записываем результат
-	d.UpdateContent(buf.String())
+	d.UpdateContent(out.String())
 	return nil
 }
 
-// ImportModifiers – регистрирует пользовательские модификаторы (аналог ExtraFuncs)
-func (d *Docx) ImportModifiers(fm map[string]modifiers.ModifierMeta) {
+// ImportModifiers добавляет набор пользовательских модификаторов.
+func (d *Docx) ImportModifiers(mods map[string]modifiers.ModifierMeta) {
 	if d.extraFuncs == nil {
 		d.extraFuncs = make(map[string]modifiers.ModifierMeta)
 	}
-	for k, v := range fm {
+	for k, v := range mods {
 		d.extraFuncs[k] = v
 	}
 }
 
-// AddModifier — удобное добавление одного модификатора без карты
-func (d *Docx) AddModifier(name string, fn any, count int) {
+// AddModifier добавляет один модификатор.
+func (d *Docx) AddModifier(name string, fn any, args int) {
 	if d.extraFuncs == nil {
 		d.extraFuncs = make(map[string]modifiers.ModifierMeta)
 	}
-	d.extraFuncs[name] = modifiers.ModifierMeta{Fn: fn, Count: count}
+	d.extraFuncs[name] = modifiers.ModifierMeta{Fn: fn, Count: args}
 }
 
-// LoadFontsForPSplit – подгружает шрифты для работы модификатора p_split
+// LoadFontsForPSplit подключает набор шрифтов для модификатора p_split.
 func (d *Docx) LoadFontsForPSplit(pathRegular, pathBold, pathItalic, pathBoldItalic string) error {
 	fonts, err := metrics.LoadFonts(pathRegular, pathBold, pathItalic, pathBoldItalic)
 	if err != nil {
-		return fmt.Errorf("load fonts for p_split: %w", err)
+		return fmt.Errorf("load fonts: %w", err)
 	}
 	d.fonts = fonts
 	return nil
 }
 
-// SetFile – заменить содержимое файла
-func (d *Docx) SetFile(name string, data []byte) {
-	name = strings.TrimPrefix(name, "/")
-	name = strings.ReplaceAll(name, "\\", "/")
+//
+// ──────────────────────────── МЕДИАФАЙЛЫ ────────────────────────────
+//
 
-	// медиаконтент храним отдельно, чтобы не потерять при шаблонизации
-	if strings.HasPrefix(name, "word/media/") {
-		if d.globalFiles == nil {
-			d.globalFiles = make(map[string][]byte)
-		}
-		d.globalFiles[name] = data
-	} else {
-		d.files[name] = data
-	}
-}
+// AddImageRel добавляет изображение и возвращает его rId + базовое имя.
+func (d *Docx) AddImageRel(data []byte) (string, string) {
+	hash := sha1.Sum(data)
+	base := fmt.Sprintf("%x", hash)
+	filename := base + ".png"
+	rId := "rId_" + base
 
-// AddImageRel — добавляет связь для изображения (image/*) в document.xml.rels
-// и регистрирует MIME-тип как Override в [Content_Types].xml.
-func (d *Docx) AddImageRel(bdata []byte) (string, string) {
-
-	sum := sha1.Sum(bdata)
-	base := fmt.Sprintf("%x", sum) // без расширения
-	name := base + ".png"
-	rId := fmt.Sprintf("rId_%s", base)
-
-	// сохраняем файл
-	d.SetFile("word/media/"+name, bdata)
-
+	d.SetFile("word/media/"+filename, data)
 	return rId, base
 }
 
-func (d *Docx) UpdateRelsAndContentTypes(rId, name string) (string, string) {
-	// --- читаем или создаём файл связей ---
+// updateMediaRelationships обновляет связи (rels) и MIME-типы для набора медиафайлов.
+func (d *Docx) updateMediaRelationships(filenames []string) {
 	const relsPath = "word/_rels/document.xml.rels"
-	data, _ := d.GetFile(relsPath)
-	if len(data) == 0 {
-		data = []byte(`<?xml version="1.0" encoding="UTF-8"?><Relationships></Relationships>`)
+
+	// читаем или создаём <Relationships>
+	relsData, _ := d.GetFile(relsPath)
+	if len(relsData) == 0 {
+		relsData = []byte(`<?xml version="1.0" encoding="UTF-8"?><Relationships></Relationships>`)
 	}
 
 	type Relationship struct {
@@ -314,57 +339,45 @@ func (d *Docx) UpdateRelsAndContentTypes(rId, name string) (string, string) {
 	}
 
 	var rels Relationships
-	_ = xml.Unmarshal(data, &rels)
-
+	err := xml.Unmarshal(relsData, &rels)
+	if err != nil {
+		return
+	}
 	if rels.XMLNS == "" {
 		rels.XMLNS = "http://schemas.openxmlformats.org/package/2006/relationships"
 	}
 
+	existing := make(map[string]bool)
 	for _, r := range rels.Items {
-		if r.ID == rId {
-			d.ensureContentType(name)
-			return rId, strings.TrimPrefix(rId, "rId_")
-		}
+		existing[r.ID] = true
 	}
 
-	rels.Items = append(rels.Items, Relationship{
-		ID:     rId,
-		Type:   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
-		Target: "media/" + name,
-	})
+	for _, name := range filenames {
+		ext := filepath.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		rId := "rId_" + base
+		if existing[rId] {
+			continue
+		}
+		rels.Items = append(rels.Items, Relationship{
+			ID:     rId,
+			Type:   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+			Target: "media/" + name,
+		})
+	}
 
-	out, _ := xml.MarshalIndent(rels, "", "  ")
-	xmlData := append([]byte(xml.Header), out...)
-	d.SetFile(relsPath, xmlData)
-
-	// добавляем MIME Override для расширения
-	d.ensureContentType(name)
-	return rId, strings.TrimPrefix(rId, "rId_")
+	output, _ := xml.MarshalIndent(rels, "", "  ")
+	d.SetFile(relsPath, append([]byte(xml.Header), output...))
+	d.updateContentTypes(filenames)
 }
 
-// ensureContentType — добавляет Override-тип изображения в [Content_Types].xml.
-func (d *Docx) ensureContentType(filename string) {
-	const typesPath = "[Content_Types].xml"
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
+// updateContentTypes добавляет MIME-типы для набора изображений.
+func (d *Docx) updateContentTypes(filenames []string) {
+	const contentPath = "[Content_Types].xml"
 
-	mimeMap := map[string]string{
-		"png":  "image/png",
-		"jpg":  "image/jpeg",
-		"jpeg": "image/jpeg",
-		"gif":  "image/gif",
-		"bmp":  "image/bmp",
-		"tif":  "image/tiff",
-		"tiff": "image/tiff",
-		"svg":  "image/svg+xml",
-	}
-	mimeType, ok := mimeMap[ext]
-	if !ok {
-		mimeType = "application/octet-stream"
-	}
-
-	ctData, _ := d.GetFile(typesPath)
-	if len(ctData) == 0 {
-		ctData = []byte(`<?xml version="1.0" encoding="UTF-8"?><Types></Types>`)
+	data, _ := d.GetFile(contentPath)
+	if len(data) == 0 {
+		data = []byte(`<?xml version="1.0" encoding="UTF-8"?><Types></Types>`)
 	}
 
 	type Override struct {
@@ -378,25 +391,46 @@ func (d *Docx) ensureContentType(filename string) {
 	}
 
 	var types Types
-	_ = xml.Unmarshal(ctData, &types)
-
+	err := xml.Unmarshal(data, &types)
+	if err != nil {
+		return
+	}
 	if types.XMLNS == "" {
 		types.XMLNS = "http://schemas.openxmlformats.org/package/2006/content-types"
 	}
 
-	part := fmt.Sprintf("/word/media/%s", filename)
-	for _, o := range types.Overrides {
-		if o.PartName == part {
-			return // уже есть
-		}
+	mime := map[string]string{
+		"png":  "image/png",
+		"jpg":  "image/jpeg",
+		"jpeg": "image/jpeg",
+		"gif":  "image/gif",
+		"bmp":  "image/bmp",
+		"tif":  "image/tiff",
+		"tiff": "image/tiff",
+		"svg":  "image/svg+xml",
 	}
 
-	types.Overrides = append(types.Overrides, Override{
-		PartName:    part,
-		ContentType: mimeType,
-	})
+	exists := make(map[string]struct{})
+	for _, o := range types.Overrides {
+		exists[o.PartName] = struct{}{}
+	}
+
+	for _, file := range filenames {
+		part := "/word/media/" + file
+		if _, ok := exists[part]; ok {
+			continue
+		}
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(file), "."))
+		ct := mime[ext]
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		types.Overrides = append(types.Overrides, Override{
+			PartName:    part,
+			ContentType: ct,
+		})
+	}
 
 	out, _ := xml.MarshalIndent(types, "", "  ")
-	xmlData := append([]byte(xml.Header), out...)
-	d.SetFile(typesPath, xmlData)
+	d.SetFile(contentPath, append([]byte(xml.Header), out...))
 }
