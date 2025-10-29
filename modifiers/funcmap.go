@@ -105,7 +105,8 @@ var builtins = map[string]ModifierMeta{
 	"date_format": {Fn: DateFormat, Count: 1},
 
 	// qrcode mod
-	"qrcode": {Fn: QrCode, Count: 0},
+	"qrcode":  {Fn: QrCode, Count: 0},
+	"barcode": {Fn: BarCode, Count: 0},
 }
 
 // NewFuncMap возвращает карту функций для Go-шаблонов.
