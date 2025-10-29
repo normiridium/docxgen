@@ -195,6 +195,7 @@ func (d *Docx) ExecuteTemplate(data map[string]any) error {
 	}
 
 	body = d.ProcessUnWrapParagraphTags(body)
+	body = d.ProcessTrimTags(body)
 
 	// 3) преобразуем {fio|declension:`genitive`} → {{ .fio | declension "genitive" }}
 	tmplSrc := TransformTemplate(body)
