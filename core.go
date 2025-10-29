@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-var globalFiles map[string][]byte
+var globalFiles = make(map[string][]byte)
 
 // Docx – основная структура, содержит файлы документа
 type Docx struct {
@@ -58,7 +58,9 @@ func Open(path string) (*Docx, error) {
 
 	modifiers.QrCodeFunc = func(value string, opts ...string) modifiers.RawXML {
 		d := doc.QrCode(value, opts...)
-		globalFiles = doc.globalFiles
+		for k, v := range doc.globalFiles {
+			globalFiles[k] = v
+		}
 		return d
 	}
 
@@ -89,6 +91,12 @@ func (d *Docx) Save(path string) error {
 	// перед сохранением объединяем медиафайлы с основной картой
 	for k, v := range globalFiles {
 		d.files[k] = v
+
+		name := strings.TrimPrefix(k, "word/media/")
+		ext := filepath.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		rId := "rId_" + base
+		d.UpdateRelsAndContentTypes(rId, name)
 	}
 
 	for name, data := range d.files {
@@ -261,9 +269,7 @@ func (d *Docx) SetFile(name string, data []byte) {
 	name = strings.ReplaceAll(name, "\\", "/")
 
 	// медиаконтент храним отдельно, чтобы не потерять при шаблонизации
-	if strings.HasPrefix(name, "word/media/") ||
-		strings.HasPrefix(name, "word/_rels/") ||
-		strings.HasPrefix(name, "[Content_Types]") {
+	if strings.HasPrefix(name, "word/media/") {
 		if d.globalFiles == nil {
 			d.globalFiles = make(map[string][]byte)
 		}
@@ -276,7 +282,6 @@ func (d *Docx) SetFile(name string, data []byte) {
 // AddImageRel — добавляет связь для изображения (image/*) в document.xml.rels
 // и регистрирует MIME-тип как Override в [Content_Types].xml.
 func (d *Docx) AddImageRel(bdata []byte) (string, string) {
-	const relsPath = "word/_rels/document.xml.rels"
 
 	sum := sha1.Sum(bdata)
 	base := fmt.Sprintf("%x", sum) // без расширения
@@ -286,7 +291,12 @@ func (d *Docx) AddImageRel(bdata []byte) (string, string) {
 	// сохраняем файл
 	d.SetFile("word/media/"+name, bdata)
 
+	return rId, base
+}
+
+func (d *Docx) UpdateRelsAndContentTypes(rId, name string) (string, string) {
 	// --- читаем или создаём файл связей ---
+	const relsPath = "word/_rels/document.xml.rels"
 	data, _ := d.GetFile(relsPath)
 	if len(data) == 0 {
 		data = []byte(`<?xml version="1.0" encoding="UTF-8"?><Relationships></Relationships>`)
@@ -313,7 +323,7 @@ func (d *Docx) AddImageRel(bdata []byte) (string, string) {
 	for _, r := range rels.Items {
 		if r.ID == rId {
 			d.ensureContentType(name)
-			return rId, base
+			return rId, strings.TrimPrefix(rId, "rId_")
 		}
 	}
 
@@ -329,7 +339,7 @@ func (d *Docx) AddImageRel(bdata []byte) (string, string) {
 
 	// добавляем MIME Override для расширения
 	d.ensureContentType(name)
-	return rId, base
+	return rId, strings.TrimPrefix(rId, "rId_")
 }
 
 // ensureContentType — добавляет Override-тип изображения в [Content_Types].xml.
