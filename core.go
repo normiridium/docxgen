@@ -533,3 +533,66 @@ func (d *Docx) updateContentTypes(filenames []string) {
 	out, _ := xml.MarshalIndent(types, "", "  ")
 	d.SetFile(contentPath, append([]byte(xml.Header), out...))
 }
+
+// SaveToWriter — записывает текущий документ DOCX напрямую в поток (например, http.ResponseWriter).
+// Повторяет логику Save(), но не пишет во временный файл.
+func (d *Docx) SaveToWriter(w io.Writer) error {
+	buffer := new(bytes.Buffer)
+	writer := zip.NewWriter(buffer)
+
+	// 1. Объединяем все медиафайлы в единую карту
+	mediaByPart := map[string][]string{}
+	globalMedia.ForEach(func(filename string, data []byte) {
+		d.files[filename] = data
+
+		mediaName := strings.TrimPrefix(filename, "word/media/")
+		parts := strings.SplitN(mediaName, "_", 2)
+		part := "document"
+		if len(parts) > 1 {
+			switch {
+			case strings.HasPrefix(parts[0], "header"):
+				part = parts[0]
+			case strings.HasPrefix(parts[0], "footer"):
+				part = parts[0]
+			}
+		}
+		mediaByPart[part] = append(mediaByPart[part], mediaName)
+	})
+
+	// 2. Обновляем rels и [Content_Types].xml
+	for part, names := range mediaByPart {
+		d.updateMediaRelationships(part, names)
+	}
+
+	// 3. Создаём ZIP-архив
+	for name, data := range d.files {
+		name = strings.TrimPrefix(name, "/")
+		name = strings.ReplaceAll(name, "\\", "/")
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+
+		header := &zip.FileHeader{
+			Name:     name,
+			Method:   zip.Deflate,
+			Modified: time.Now().UTC(),
+		}
+		writerFile, err := writer.CreateHeader(header)
+		if err != nil {
+			return fmt.Errorf("create entry %s: %w", name, err)
+		}
+		if _, err := writerFile.Write(data); err != nil {
+			return fmt.Errorf("write entry %s: %w", name, err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close zip: %w", err)
+	}
+
+	// 4. Отдаём результат в поток
+	if _, err := io.Copy(w, buffer); err != nil {
+		return fmt.Errorf("write to stream: %w", err)
+	}
+	return nil
+}
