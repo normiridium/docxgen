@@ -2,23 +2,161 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"docxgen"
 	"docxgen/modifiers"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+// ---------- live-preview (SSE) ----------
+
+var (
+	sseMu      sync.Mutex
+	sseClients = map[chan struct{}]struct{}{}
+)
+
+// Шлём сигнал всем подписчикам /events
+func sseNotifyReload() {
+	sseMu.Lock()
+	defer sseMu.Unlock()
+	for ch := range sseClients {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func sseHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := make(chan struct{}, 1)
+
+	sseMu.Lock()
+	sseClients[ch] = struct{}{}
+	sseMu.Unlock()
+
+	// первое "привет"
+	_, err := fmt.Fprintf(w, "data: init\n\n")
+	if err != nil {
+		return
+	}
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	notify := func() error {
+		_, err := fmt.Fprintf(w, "data: reload\n\n")
+		if err == nil {
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		return err
+	}
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ch:
+			if err := notify(); err != nil {
+				sseMu.Lock()
+				delete(sseClients, ch)
+				sseMu.Unlock()
+				return
+			}
+		case <-ctx.Done():
+			sseMu.Lock()
+			delete(sseClients, ch)
+			sseMu.Unlock()
+			return
+		}
+	}
+}
+
+// путь к файлу, который смотрим в превью
+func previewOutputPath(out string, pdfOut bool) string {
+	if pdfOut {
+		low := strings.ToLower(out)
+		if strings.HasSuffix(low, ".pdf") {
+			return out
+		}
+		return strings.TrimSuffix(out, filepath.Ext(out)) + ".pdf"
+	}
+	return out
+}
+
+const previewHTML = `<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>docxgen preview</title>
+		<style>
+			html, body { margin:0; padding:0; height:100%; }
+			iframe { border:0; width:100%; height:100%; }
+		</style>
+	</head>
+	<body>
+		<iframe id="frame" src="/file"></iframe>
+		<script>
+			const es = new EventSource("/events");
+			es.onmessage = function() {
+			const f = document.getElementById("frame");
+			f.src = "/file?t=" + Date.now();
+			};
+		</script>
+	</body>
+</html>
+`
+
+func runPreviewServer(port int, out string, pdfOut bool) {
+	outPath := previewOutputPath(out, pdfOut)
+
+	http.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, previewHTML)
+	})
+
+	http.HandleFunc("/file", func(w http.ResponseWriter, r *http.Request) {
+		path := outPath
+
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+
+		if pdfOut {
+			w.Header().Set("Content-Type", "application/pdf")
+		} else {
+			w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+		}
+		http.ServeFile(w, r, path)
+	})
+
+	http.HandleFunc("/events", sseHandler)
+
+	log.Printf("🦌 preview: http://localhost:%d/view\n", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+}
+
+// ---------- main ----------
 
 func main() {
 	in := flag.String("in", "", "входной DOCX-шаблон")
@@ -27,11 +165,15 @@ func main() {
 	watch := flag.Bool("watch", false, "следить за изменениями и пересборкой автоматически")
 	debounce := flag.Duration("debounce", 300*time.Millisecond, "дебаунс перед пересборкой")
 	serve := flag.Bool("serve", false, "режим демона (HTTP API)")
-	port := flag.Int("port", 8080, "порт HTTP демона")
+	port := flag.Int("port", 8080, "порт HTTP демона / превью")
 	download := flag.Bool("download", false, "не сохранять, а вывести готовый DOCX в stdout")
+	pdfOut := flag.Bool("pdf", false, "сразу конвертировать в PDF (без сохранения DOCX)")
+	preview := flag.Bool("preview", false, "запустить HTML-просмотрщик /view для результата (удобно с --watch и --pdf)")
+	pdfEngine := flag.String("pdf-engine", "", "preferred PDF engine: doc2pdf|libreoffice|soffice|unoconv|pandoc")
 	flag.Parse()
 
 	baseDir, _ := os.Getwd()
+	pdfEngineFlag = *pdfEngine
 
 	// ищем корень проекта по наличию go.mod
 	projectRoot := baseDir
@@ -64,13 +206,24 @@ func main() {
 	}
 
 	// первая сборка
-	if err := render(*in, *dataFile, *out, projectRoot, *download); err != nil {
+	if err := render(*in, *dataFile, *out, projectRoot, *download, *pdfOut); err != nil {
 		log.Fatalf("💥  ошибка сборки: %v\n", err)
 	}
 	if *download {
 		return
 	}
-	fmt.Println("💚  готово: " + strings.TrimPrefix(*out, baseDir))
+	fmt.Println("💚  готово: " + prettyOutputPath(*out, *pdfOut, baseDir))
+
+	// если превью, запускаем сервер
+	if *preview {
+		if *watch {
+			go runPreviewServer(*port, *out, *pdfOut)
+		} else {
+			// без watch — просто сервер-просмотрщик
+			runPreviewServer(*port, *out, *pdfOut)
+			return
+		}
+	}
 
 	// watch
 	if !*watch {
@@ -125,10 +278,12 @@ func main() {
 		}
 		t = time.AfterFunc(*debounce, func() {
 			fmt.Println("🔄  пересборка…")
-			if err := render(*in, *dataFile, *out, projectRoot, false); err != nil {
+			if err := render(*in, *dataFile, *out, projectRoot, false, *pdfOut); err != nil {
 				fmt.Printf("💥  %v\n", err)
 			} else {
-				fmt.Println("💚  готово: " + strings.TrimPrefix(*out, baseDir))
+				fmt.Println("💚  готово: " + prettyOutputPath(*out, *pdfOut, baseDir))
+				// пинг браузеру
+				sseNotifyReload()
 			}
 		})
 	}
@@ -244,7 +399,7 @@ func registerCommonModifiers(doc *docxgen.Docx) {
 }
 
 // ---------- CLI рендер ----------
-func render(in, dataFile, out, projectRoot string, download bool) error {
+func render(in, dataFile, out, projectRoot string, download, pdfOut bool) error {
 	data := map[string]any{}
 	raw, err := os.ReadFile(dataFile)
 	if err != nil {
@@ -261,6 +416,23 @@ func render(in, dataFile, out, projectRoot string, download bool) error {
 
 	if err := executeTemplate(doc, data); err != nil {
 		return err
+	}
+
+	if pdfOut {
+		var buf bytes.Buffer
+		if err := doc.SaveToWriter(&buf); err != nil {
+			return err
+		}
+		pdfData, err := convertToPDF(buf.Bytes())
+		if err != nil {
+			return err
+		}
+		if download {
+			_, err = os.Stdout.Write(pdfData)
+			return err
+		}
+		pdfPath := strings.TrimSuffix(out, filepath.Ext(out)) + ".pdf"
+		return os.WriteFile(pdfPath, pdfData, 0644)
 	}
 
 	if download {
@@ -385,6 +557,119 @@ func runServer(port int, projectRoot string) {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
 }
 
+var pdfEngineFlag string
+
+// порядок движков: от лучшего к худшему
+var pdfEngines = []string{
+	"doc2pdf", // OnlyOffice: быстрый, идеальный
+	"soffice", // LibreOffice headless
+	"libreoffice",
+	"lowriter",
+	"unoconv", // fallback, но крайне ненадёжный
+}
+
+func findExec(bin string) (string, bool) {
+	p, err := exec.LookPath(bin)
+	return p, err == nil
+}
+
+func runEngine(engine string, docx, pdf string) error {
+	fmt.Printf("📑  пробуем конвертацию в pdf через: %s\n", engine)
+	switch engine {
+
+	case "doc2pdf":
+		return exec.Command("doc2pdf", docx, pdf).Run()
+
+	case "soffice", "libreoffice":
+		return exec.Command(engine,
+			"--headless",
+			"--convert-to", "pdf:writer_pdf_Export",
+			"--outdir", filepath.Dir(pdf),
+			docx,
+		).Run()
+
+	case "lowriter":
+		return exec.Command("lowriter",
+			"--convert-to", "pdf",
+			"--outdir", filepath.Dir(pdf),
+			docx,
+		).Run()
+
+	case "unoconv":
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// unoconv требует basename без расширения
+		outNoExt := strings.TrimSuffix(pdf, filepath.Ext(pdf))
+
+		cmd := exec.CommandContext(ctx,
+			"unoconv",
+			"-f", "pdf",
+			"-o", outNoExt, // <--- ВАЖНО!
+			docx,
+		)
+
+		if err := cmd.Run(); err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("unoconv timeout")
+			}
+			return fmt.Errorf("unoconv failed: %w", err)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("unknown engine: %s", engine)
+}
+
+func convertToPDF(docxBytes []byte) ([]byte, error) {
+
+	tmpDocx := filepath.Join(os.TempDir(), fmt.Sprintf("doc_%d.docx", time.Now().UnixNano()))
+	tmpPDF := strings.TrimSuffix(tmpDocx, ".docx") + ".pdf"
+
+	if err := os.WriteFile(tmpDocx, docxBytes, 0644); err != nil {
+		return nil, err
+	}
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+			fmt.Printf("не удалился файл %s, ошибка: %v", name, err)
+		}
+	}(tmpDocx)
+
+	// preferred engine
+	if pdfEngineFlag != "" {
+		if _, ok := findExec(pdfEngineFlag); ok {
+			if err := runEngine(pdfEngineFlag, tmpDocx, tmpPDF); err == nil {
+				data, _ := os.ReadFile(tmpPDF)
+				_ = os.Remove(tmpPDF)
+				return data, nil
+			}
+		}
+	}
+
+	// try engines in order
+	for _, engine := range pdfEngines {
+		_, ok := findExec(engine)
+		if !ok {
+			continue
+		}
+
+		err := runEngine(engine, tmpDocx, tmpPDF)
+		if err != nil {
+			// skip silently → continue to next engine
+			continue
+		}
+
+		// success
+		data, err := os.ReadFile(tmpPDF)
+		_ = os.Remove(tmpPDF)
+		return data, err
+	}
+
+	return nil, fmt.Errorf("no available PDF engines found")
+}
+
 // ---------- вспомогательные ----------
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
@@ -421,4 +706,20 @@ func hasAnySuffix(s string, exts ...string) bool {
 		}
 	}
 	return false
+}
+
+func prettyOutputPath(out string, pdfOut bool, baseDir string) string {
+	// выбираем реальное имя файла
+	result := out
+	if pdfOut {
+		result = strings.TrimSuffix(out, filepath.Ext(out)) + ".pdf"
+	}
+
+	// убираем абсолютный путь для приватности
+	pretty := strings.TrimPrefix(result, baseDir)
+	if strings.HasPrefix(pretty, "/") {
+		pretty = pretty[1:]
+	}
+
+	return pretty
 }
