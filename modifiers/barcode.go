@@ -2,66 +2,66 @@ package modifiers
 
 var BarCodeFunc func(string, ...string) RawXML
 
-// BarCode — вставляет штрихкод по заданному значению прямо в документ.
+// BarCode - Inserts a barcode at a preset value directly into the document.
 //
-// Пример использования:
+// Example of use:
 //
-//	{product.code|barcode:`code128`:`anchor`:`right`:`top`:`50mm*15mm`:`10%`:`2/5`:`border`}
+// {product.code|barcode:`code128`:`anchor`:`right`:`top`:`50mm*15mm`:`10%`:`2/5`:`border`}
 //
-// Формат:
+// Format:
 //
-//	{значение|barcode:[type]:[mode]:[align]:[valign]:[size]:[crop%]:[margins]:[border]}
+// {value|barcode:[type]:[mode]:[align]:[valign]:[size]:[crop%]:[margins]:[border]}
 //
-// Параметры (все необязательные, порядок не важен):
+// Parameters (all optional, the order is not important):
 //
-//   - type — тип штрихкода.
-//     Поддерживаются: "code128" (по умолчанию), "ean13".
-//     Если не указано, используется "code128".
+//   - type—barcode type.
+//     Supported: "code128" (default), "ean13".
+//     If not specified, "code128" is used.
 //
-//   - mode — "anchor" (по умолчанию) или "inline".
-//     "anchor" — плавающее размещение относительно текста (как картинка),
-//     "inline" — встроенный элемент строки.
+//   - mode — "anchor" (default) or "inline".
+//     "anchor" — floating placement relative to the text (like an image),
+//     "inline" is an inline line element.
 //
 //   - align — "left", "center", "right".
-//     Горизонтальное выравнивание для режима anchor (по умолчанию "right").
+//     Horizontal alignment for anchor mode (default is "right").
 //
 //   - valign — "top", "middle", "bottom".
-//     Вертикальное выравнивание (по умолчанию "top").
-//     "middle" автоматически преобразуется в "center".
+//     Vertical alignment (default "top").
+//     "middle" is automatically converted to "center".
 //
-//   - size — размеры штрихкода:
+// - size — barcode dimensions:
 //
-//   - "<N>mm" — ширина (высота вычисляется как 1/3 ширины, пропорция 3:1);
+// - <N>"mm" – width (height is calculated as 1/3 of the width, aspect ratio 3:1);
 //
-//   - "<W>mm*<H>mm" — заданы обе стороны явно;
+// - "<W>mm*<H>mm" — both sides are explicitly specified;
 //
-//   - "<N>%" — ширина в процентах от ширины страницы;
+// - "<N>%" — width as a percentage of the page width;
 //
-//   - "<W>%*<H>mm" или наоборот — комбинированные размеры (проценты + миллиметры).
+// - <W>"%*<H>mm" or vice versa - combined sizes (percent + millimeters).
 //
-//   - <N>% — кроп (обрезка белых полей вокруг штрихкода).
-//     Значение задаётся числом процентов (по умолчанию 0).
+//   - <N>% – crop (trimming the white margins around the barcode).
+//     The value is set by the number of percentages (0 by default).
 //
-//   - margins — отступы от текста (для режима anchor), миллиметры.
-//     Форматы:
-//     "5/5"         — верх/низ = 5 мм, лево/право = 5 мм;
-//     "5/3/5/3"     — top/right/bottom/left отдельно;
-//     "5/3/7"       — top, боковые, низ.
+//   - margins — indents from the text (for anchor mode), millimeters.
+//     Formats:
+//     "5/5" — top/bottom = 5 mm, left/right = 5 mm;
+//     "5/3/5/3" - top/right/bottom/left separately;
+//     "5/3/7" - top, side, bottom.
 //
-//   - border — флаг, добавляет тонкую чёрную рамку (≈ 0.5 pt) вокруг штрихкода.
+// - border — a flag that adds a thin black border (≈ 0.5 pt) around the barcode.
 //
-// Особенности:
+// Features:
 //
-//   - Штрихкод масштабируется пропорционально или по заданным размерам.
-//   - Размеры могут быть заданы как абсолютные (мм) или относительные (% от страницы).
-//   - Поддерживаются режимы "inline" и "anchor" — аналогично QR-коду.
-//   - Поддерживается кроп белых полей и настройка внешних отступов.
-//   - При использовании в пайплайнах (например, {code|compact|barcode})
-//     штрихкод получает значение после всех предыдущих фильтров.
+// - Barcode scales proportionally or to specified sizes.
+//   - Dimensions can be set as absolute (mm) or relative (% of page).
+//   - "Inline" and "anchor" modes are supported, similar to a QR code.
+//   - Cropping of white margins and setting of external paddings are supported.
+//   - When used in pipelines (e.g. {code|compact|barcode})
+//     The barcode gets a value after all the previous filters.
 //
-// Возвращает:
+// Returns:
 //
-//	XML-фрагмент <w:drawing> с изображением штрихкода.
+// An XML fragment <w:drawing> with an image of the barcode.
 func BarCode(value string, opts ...string) RawXML {
 	if BarCodeFunc == nil {
 		return ""

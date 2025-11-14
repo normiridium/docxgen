@@ -39,13 +39,14 @@ import "docxgen/modifiers"
 - [type ModifierMeta](<#ModifierMeta>)
 - [type Options](<#Options>)
 - [type RawXML](<#RawXML>)
+  - [func BarCode\(value string, opts ...string\) RawXML](<#BarCode>)
   - [func NewLine\(s string\) RawXML](<#NewLine>)
   - [func QrCode\(value string, opts ...string\) RawXML](<#QrCode>)
 
 
 ## Constants
 
-<a name="TAB"></a>Чтобы Word корректно отображал табуляцию, нужно закрывать предыдущий текстовый элемент. Поэтому при нескольких подряд табах появляются пустые \<w:t\>\</w:t\>, но в Word они всё равно отображаются правильно и выглядят лучше, чем любые другие варианты.
+<a name="TAB"></a>For Word to display the tab correctly, you need to close the previous text element. Therefore, with several tabs in a row, empty \<w:t\>\</w:t\> appear, but in Word they are still display correctly and look better than any other options.
 
 ```go
 const (
@@ -54,22 +55,28 @@ const (
 )
 ```
 
-<a name="NBSP"></a>Неразрывные пробелы \(обычный и узкий\)
+<a name="NBSP"></a>Non\-breaking spaces \(normal and narrow\)
 
 ```go
 const (
-    NBSP  = "\u00A0" // обычный неразрывный пробел
-    NNBSP = "\u202F" // узкий неразрывный пробел
+    NBSP  = "\u00A0" // Normal Unbroken Space
+    NNBSP = "\u202F" // Narrow continuous space
 )
 ```
 
 ## Variables
 
+<a name="BarCodeFunc"></a>
+
+```go
+var BarCodeFunc func(string, ...string) RawXML
+```
+
 <a name="NewLineInText"></a>
 
 ```go
 var (
-    // NewLineInText - Перенос строки внутри параграфа
+    // NewLineInText - Line wrap within a paragraph
     NewLineInText = "</w:t><w:br/><w:t>"
 )
 ```
@@ -87,14 +94,14 @@ var QrCodeFunc func(string, ...string) RawXML
 func Abbr(s string) string
 ```
 
-Abbr \- делает сокращения, инициалы и короткие слова неразрывными с последующим словом. Это предотвращает разрыв “г.”, “ул.”, “ООО”, “И.” и т. п. на концах строк.
+Abbr \- makes abbreviations, initials, and short words inseparable from the subsequent word. This prevents the breakage of "g.", "st.", "LLC", "I.", etc. at the ends of the lines.
 
-Примеры:
+Examples:
 
 ```
-"г. Москва" → "г. Москва"
-"И. И. Иванов" → "И. И. Иванов"
-"ООО Центр" → "ООО Центр"
+"г. Москва" → "г. Москва"
+"И. И. Иванов" → "И. И. Иванов"
+"ООО Центр" → "ООО Центр"
 ```
 
 <a name="Compact"></a>
@@ -104,12 +111,12 @@ Abbr \- делает сокращения, инициалы и короткие 
 func Compact(s string) string
 ```
 
-Compact \- заменяет все пробелы на узкие неразрывные. Подходит для телефонов, номеров документов и таблиц.
+Compact \- replaces all spaces with narrow non\-breaking spaces. Suitable for phones, document numbers, and spreadsheets.
 
-Пример:
+Example:
 
 ```
-{user_phone|compact} → "+7 (4912) 572-466"
+{user_phone|compact} → "+7 (4912) 572-466"
 ```
 
 <a name="ConcatFactory"></a>
@@ -119,9 +126,9 @@ Compact \- заменяет все пробелы на узкие неразры
 func ConcatFactory(data map[string]any) func(base string, parts ...string) string
 ```
 
-ConcatFactory возвращает функцию concat, которая склеивает строку с тегами или текстом. Последний параметр всегда считается разделителем.
+ConcatFactory returns a concat function that glues a string with tags or text. The last parameter is always considered a separator.
 
-Примеры:
+Examples:
 
 ```
 {own_org_name|concat:`own_org_address`:`position`:`department`:`, `}
@@ -141,9 +148,9 @@ ConcatFactory возвращает функцию concat, которая скл�
 func DateFormat(val any, layout string) string
 ```
 
-DateFormat — форматирует дату по шаблону Go \(например, "02.01.2006"\).
+DateFormat \- Formats the date according to the Go pattern \(for example, "01/02/2006"\).
 
-Примеры:
+Examples:
 
 ```
 {project.deadline|date_format:`02.01.2006`} → "01.03.2026"
@@ -157,9 +164,9 @@ DateFormat — форматирует дату по шаблону Go \(напр
 func Declension(v any, opts ...string) string
 ```
 
-Declension — склоняет ФИО в указанный падеж и формат, используя petrovich\-go. Если приходит строка "Фамилия Имя Отчество" — делает автоматическое склонение. Если приходит map\[string\]string с готовыми формами — выбирает нужную.
+Declension — declenses the full name in the specified case and format, using petrovich\-go. If the line "Surname, First Name, Patronymic" comes, it makes an automatic declension. If a map\[string\]string comes with ready\-made forms, it selects the desired one.
 
-Примеры:
+Examples:
 
 ```
 {user_fio|declension:`предложный`:`ф и о`} = "Иванову Ивану Ивановичу"
@@ -175,9 +182,9 @@ Declension — склоняет ФИО в указанный падеж и фо�
 func DefaultValue(s, def string) string
 ```
 
-DefaultValue — вернуть значение по умолчанию, если строка пустая.
+DefaultValue \- Return the default value if the string is empty.
 
-Пример:
+Example:
 
 ```
 {position|default:`сотрудник`} → "сотрудник"
@@ -190,9 +197,9 @@ DefaultValue — вернуть значение по умолчанию, есл
 func Filled(val any, out string) string
 ```
 
-Filled — вернуть указанное значение, если строка непустая; иначе пусто.
+Filled — return the specified value if the string is not empty; otherwise it is empty.
 
-Пример:
+Example:
 
 ```
 {passport|filled:`—`} → "—"
@@ -205,26 +212,23 @@ Filled — вернуть указанное значение, если стро
 func MakePSplit(fonts *metrics.FontSet) func(text string, firstUnders, otherUnders, nLine any, extra ...any) string
 ```
 
-MakePSplit — модификатор p\_split, реализует переносы строк как в офисных редакторах, но только в таблицах, где текст нужно раскидать равномерно по ячейкам.
+MakePSplit is a p\_split modifier that implements line breaks like in office editors, But only in tables, where the text needs to be scattered evenly across the cells.
 
-В шаблоне дизайнер руками проставляет строки из подчёркиваний "\_". По их количеству мы узнаем сколько символов «влезет» в строку. Далее заводится тег с модификатором p\_split вместо этих подчеркиваний. При написании модификатора p\_split количество подчеркиваний указывается в параметрах. Программа сама пересчитает количество подчеркиваний в pt исходя из размера текста, начертания.
+In the template, the designer puts lines of underscores with "\_" by hand. By their number, we find out how many characters will "fit" into the line. Next, a tag with a p\_split modifier is created instead of these underscores. When you write a modifier p\_split the number of underlines is specified in the parameters. The program itself will recalculate the number of underlines in pt based on the size of the text and style.
 
-Алгоритм: текст делится на слова и раскладывается по строкам, чтобы слова не рвались и каждая строка укладывалась в заданное число символов.
+Algorithm: the text is divided into words and laid out into lines, so that the words do not break and each line fits into a given number of characters.
 
-Параметры \(через двоеточие\):
+Parameters \(separated by a colon\):
 
-```
-{tag|p_split:<indentCount>:<lineCount>:<nLine>[:<style>:<fontSize>]}
-• indentCount — количество подчёркиваний в первой строке (если есть абзацный отступ);
-                если отступа нет, indentCount = lineCount;
-• lineCount   — количество подчёркиваний во всех последующих строках;
-• nLine       — номер строки, которую нужно взять;
-                если указано с плюсом (например, +2), берутся все строки начиная с этой;
-• style       — (необязательно) стиль шрифта: regular, bold, italic, bolditalic;
-• fontSize    — (необязательно) размер шрифта (10, 12, 14 и т. д.).
-```
+\{tag|p\_split:\<indentCount\>:\<lineCount\>:\<nLine\>\[:\<style\>:\<fontSize\>\]\}
 
-Примеры:
+- indentCount — the number of underscores in the first line \(if there is a paragraph indent\); if there is no indent indent, indentCount = lineCount;
+- lineCount — the number of underscores in all subsequent lines;
+- nLine — the number of the line to be taken; if indicated with a plus \(for example, \+2\), all lines starting with this one are taken;
+- style — \(optional\) font style: regular, bold, italic, bolditalic;
+- fontSize—\(optional\) font size \(10, 12, 14, etc.\).
+
+Examples:
 
 ```
 {address|p_split:20:65:1}        → первая строка адреса (20 подчёркиваний, затем 65)
@@ -240,9 +244,9 @@ MakePSplit — модификатор p\_split, реализует перено�
 func Money(v any, opts ...string) string
 ```
 
-Money — форматирует число как денежное значение с разделением тысяч пробелами. Поддерживает флаг "int" / "целое" для скрытия дробной части, а также пользовательский формат через шаблон fmt.Sprintf.
+Money \- Formats a number as a monetary value separated by thousands of spaces. Supports the "int" / "целое" flag to hide the fractional part, as well as custom format via FMT template. Sprintf.
 
-Примеры:
+Examples:
 
 ```
 {sum|money}                    → "1 234,56"
@@ -261,7 +265,7 @@ Money — форматирует число как денежное значен
 func NewFuncMap(opts Options) template.FuncMap
 ```
 
-NewFuncMap возвращает карту функций для Go\-шаблонов. Подключает стандартные модификаторы и сливает ExtraFuncs поверх.
+NewFuncMap returns a function map for Go templates. Plugs in the standard modifiers and drains the ExtraFuncs on top.
 
 <a name="Nowrap"></a>
 ## func Nowrap
@@ -270,12 +274,12 @@ NewFuncMap возвращает карту функций для Go\-шабло�
 func Nowrap(s string) string
 ```
 
-Nowrap \- заменяет все обычные пробелы на неразрывные. Используется для коротких кодов, индексов, номеров.
+Nowrap \- replaces all regular spaces with non\-breaking spaces. Used for short codes, zip codes, numbers.
 
-Пример:
+Example:
 
 ```
-{case_index|nowrap} → "Дело № 15"
+{case_index|nowrap} → "Дело № 15"
 ```
 
 <a name="Numeral"></a>
@@ -285,9 +289,9 @@ Nowrap \- заменяет все обычные пробелы на нераз�
 func Numeral(v any, opts ...string) string
 ```
 
-Numeral — числовой модификатор с морфологией \(род, падеж, вариант 8, вариант нуля\).
+Numeral is a numerical modifier with morphology \(gender, case, variant 8, variant zero\).
 
-Примеры:
+Examples:
 
 ```
 {count|numeral} → "один"
@@ -305,9 +309,9 @@ Numeral — числовой модификатор с морфологией \(
 func PadLeft(v any, length int, char string) string
 ```
 
-PadLeft — дополняет строку слева символом до указанной длины.
+PadLeft \- Completes the string on the left with a character up to a specified length.
 
-Пример:
+Example:
 
 ```
 {num|pad_left:`5`:`0`} → "00042"
@@ -320,9 +324,9 @@ PadLeft — дополняет строку слева символом до у�
 func PadRight(v any, length int, char string) string
 ```
 
-PadRight — дополняет строку справа символом до указанной длины.
+PadRight \- Completes the string on the right with a character up to a specified length.
 
-Пример:
+Example:
 
 ```
 {num|pad_right:`3`:`0`} → "420"
@@ -335,9 +339,9 @@ PadRight — дополняет строку справа символом до 
 func Plural(v any, forms ...string) string
 ```
 
-Plural — склонение существительных по числу. v — значение \(число или строка с числом\), forms — три формы слова: \["сотрудник", "сотрудника", "сотрудников"\].
+Plural is the declension of nouns by number. v is a value \(a number or a string with a number\), forms — three forms of the word: \["employee", "employee", "employees"\].
 
-Примеры:
+Examples:
 
 ```
 {count|plural:`день`:`дня`:`дней`}        → "дня"
@@ -352,9 +356,9 @@ Plural — склонение существительных по числу. v 
 func Postfix(s, p string) string
 ```
 
-Postfix — добавить постфикс к строке, если она не пустая.
+Postfix — add a postfix to the string if it is not empty.
 
-Пример:
+Example:
 
 ```
 {sum|postfix:` руб.`} → "100 руб."
@@ -367,9 +371,9 @@ Postfix — добавить постфикс к строке, если она �
 func Prefix(s, p string) string
 ```
 
-Prefix — добавить префикс к строке, если она не пустая.
+Prefix \- Add a prefix to the string if it is not empty.
 
-Пример:
+Example:
 
 ```
 {fio|prefix:`гражданин `} → "гражданин Иванов Иван Иванович"
@@ -382,9 +386,9 @@ Prefix — добавить префикс к строке, если она не
 func Replace(s, old, new string) string
 ```
 
-Replace — заменить все вхождения подстроки.
+Replace \- Replace all occurrences of the substring.
 
-Пример:
+Example:
 
 ```
 {address|replace:`Москва`:`Санкт-Петербург`}
@@ -397,9 +401,9 @@ Replace — заменить все вхождения подстроки.
 func Roman(v any) string
 ```
 
-Roman — переводит число в римские цифры.
+Roman \- Converts the number into Roman numerals.
 
-Пример:
+Example:
 
 ```
 {page|roman} → "XIV"
@@ -412,20 +416,20 @@ Roman — переводит число в римские цифры.
 func RuPhone(s string, formats ...string) string
 ```
 
-RuPhone \- форматирует российские номера телефонов по шаблонам. Если номер не распознан, возвращает исходную строку.
+RuPhone formats Russian phone numbers according to templates. If the number is not recognized, returns the original string.
 
-Примеры:
+Examples:
 
 ```
 {user_phone|phone} → "+7 (4912) 572-466"
 {user_phone|phone:`тел.: +7 ($2) $3-$4-$5`:`тел.: +7 ($2) $3-$4`}
 ```
 
-Параметры:
+Options:
 
-- без параметров — используется стандартный формат;
-- 1 параметр — шаблон для мобильного телефона;
-- 2 параметра — шаблон для мобильного и регионального телефона.
+- No parameters — the standard format is used;
+- 1 parameter — template for a mobile phone;
+- 2 parameters – template for mobile and regional phones.
 
 <a name="Sign"></a>
 ## func Sign
@@ -434,9 +438,9 @@ RuPhone \- форматирует российские номера телефо
 func Sign(v any) string
 ```
 
-Sign — добавляет знак "\+" к положительным числам.
+Sign \- Adds a "\+" sign to positive numbers.
 
-Примеры:
+Examples:
 
 ```
 {delta|sign} → "+5"
@@ -451,9 +455,9 @@ Sign — добавляет знак "\+" к положительным числ
 func Truncate(s string, n int, suffix string) string
 ```
 
-Truncate — обрезать строку до n символов, при необходимости добавить хвост \(например, "…"\).
+Truncate \- Trim the string to n characters, add a tail if necessary \(e.g. "..."\).
 
-Пример:
+Example:
 
 ```
 {title|truncate:`20`:`…`} → "Очень длинное заг…"
@@ -466,9 +470,9 @@ Truncate — обрезать строку до n символов, при не�
 func UniqPostfix(s, p string) string
 ```
 
-UniqPostfix — добавить постфикс только если строка непустая и ещё не оканчивается на него.
+UniqPostfix — add a postfix only if the line is not empty and does not end with it yet.
 
-Пример:
+Example:
 
 ```
 {city|uniqpostfix:` г.`} → "Москва г."
@@ -481,9 +485,9 @@ UniqPostfix — добавить постфикс только если стро
 func UniqPrefix(s, p string) string
 ```
 
-UniqPrefix — добавить префикс только если строка непустая и ещё не начинается с него.
+UniqPrefix \- add a prefix only if the string is not empty and does not start with it yet.
 
-Пример:
+Example:
 
 ```
 {org|uniqprefix:`ООО `} → "ООО Ромашка"
@@ -496,9 +500,9 @@ UniqPrefix — добавить префикс только если строк�
 func WordReverse(s string) string
 ```
 
-WordReverse — меняет порядок слов в строке на обратный.
+WordReverse \- Changes the order of words in a string to reverse.
 
-Примеры:
+Examples:
 
 ```
 {fio|word_reverse}
@@ -515,13 +519,11 @@ WordReverse — меняет порядок слов в строке на обр
 func WrapModifier(fn any, fixed int) any
 ```
 
-WrapModifier — единая обёртка вызова модификатора. Делает разбор аргументов по правилу DSL: первые "fixed" — фиксированные, последний — pipeline\-value, всё между ними — "formats". Затем вызывает целевую функцию в виде:
+WrapModifier is a single wrapper for a modifier call. Parses arguments according to the DSL rule: the first "fixed" is fixed, the last is pipeline\-value, everything in between is "formats". Then calls the target function in the form:
 
-```
-fn(value, fixed..., formats...)
-```
+fn\(value, fixed..., formats...\)
 
-Поддерживает вариадики. gomarkdoc:ignore
+Supports variadics.
 
 <a name="ModifierMeta"></a>
 ## type ModifierMeta
@@ -530,24 +532,24 @@ fn(value, fixed..., formats...)
 
 ```go
 type ModifierMeta struct {
-    Fn    any // целевая функция (с "красивой" сигнатурой)
-    Count int // сколько ПЕРВЫХ аргументов считать фиксированными; pipeline-value всегда последний
+    Func  any // target function (with a "beautiful" signature)
+    Count int // how many FIRST arguments are considered fixed; pipeline-value is always the last
 }
 ```
 
 <a name="Options"></a>
 ## type Options
 
-Options задаёт параметры построения FuncMap.
+Options sets the parameters for building the FuncMap.
 
 ```go
 type Options struct {
-    // Fonts — набор шрифтов для p_split. Если nil, p_split не подключаем.
+    // Fonts is a set of fonts for p_split. If nil, don't connect p_split.
     Fonts *metrics.FontSet
-    // Data — входные данные шаблона (нужны для concat, чтобы уметь подцеплять другие теги по имени).
+    // Data — template input data (needed for concat to be able to pick up other tags by name).
     Data map[string]any
-    // ExtraFuncs — пользовательские модификаторы с количеством фиксированных параметров.
-    // Поведение полностью аналогично builtins.
+    // ExtraFuncs are custom modifiers with a number of fixed parameters.
+    // The behavior is completely similar to builtins.
     ExtraFuncs map[string]ModifierMeta
 }
 ```
@@ -555,11 +557,67 @@ type Options struct {
 <a name="RawXML"></a>
 ## type RawXML
 
-RawXML — тип для "сырых" XML\-вставок, которые не нужно экранировать.
+RawXML is a type for raw XML inserts that do not need to be escaped.
 
 ```go
 type RawXML string
 ```
+
+<a name="BarCode"></a>
+### func BarCode
+
+```go
+func BarCode(value string, opts ...string) RawXML
+```
+
+BarCode \- Inserts a barcode at a preset value directly into the document.
+
+Example of use:
+
+\{product.code|barcode:\`code128\`:\`anchor\`:\`right\`:\`top\`:\`50mm\*15mm\`:\`10%\`:\`2/5\`:\`border\`\}
+
+Format:
+
+\{value|barcode:\[type\]:\[mode\]:\[align\]:\[valign\]:\[size\]:\[crop%\]:\[margins\]:\[border\]\}
+
+Parameters \(all optional, the order is not important\):
+
+- type—barcode type. Supported: "code128" \(default\), "ean13". If not specified, "code128" is used.
+
+- mode — "anchor" \(default\) or "inline". "anchor" — floating placement relative to the text \(like an image\), "inline" is an inline line element.
+
+- align — "left", "center", "right". Horizontal alignment for anchor mode \(default is "right"\).
+
+- valign — "top", "middle", "bottom". Vertical alignment \(default "top"\). "middle" is automatically converted to "center".
+
+\- size — barcode dimensions:
+
+\- \<N\>"mm" – width \(height is calculated as 1/3 of the width, aspect ratio 3:1\);
+
+\- "\<W\>mm\*\<H\>mm" — both sides are explicitly specified;
+
+\- "\<N\>%" — width as a percentage of the page width;
+
+\- \<W\>"%\*\<H\>mm" or vice versa \- combined sizes \(percent \+ millimeters\).
+
+- \<N\>% – crop \(trimming the white margins around the barcode\). The value is set by the number of percentages \(0 by default\).
+
+- margins — indents from the text \(for anchor mode\), millimeters. Formats: "5/5" — top/bottom = 5 mm, left/right = 5 mm; "5/3/5/3" \- top/right/bottom/left separately; "5/3/7" \- top, side, bottom.
+
+\- border — a flag that adds a thin black border \(≈ 0.5 pt\) around the barcode.
+
+Features:
+
+\- Barcode scales proportionally or to specified sizes.
+
+- Dimensions can be set as absolute \(mm\) or relative \(% of page\).
+- "Inline" and "anchor" modes are supported, similar to a QR code.
+- Cropping of white margins and setting of external paddings are supported.
+- When used in pipelines \(e.g. \{code|compact|barcode\}\) The barcode gets a value after all the previous filters.
+
+Returns:
+
+An XML fragment \<w:drawing\> with an image of the barcode.
 
 <a name="NewLine"></a>
 ### func NewLine
@@ -568,7 +626,7 @@ type RawXML string
 func NewLine(s string) RawXML
 ```
 
-NewLine — добавить перенос к строке.
+NewLine — Add a hyphen to a line.
 
 <a name="QrCode"></a>
 ### func QrCode
@@ -577,40 +635,36 @@ NewLine — добавить перенос к строке.
 func QrCode(value string, opts ...string) RawXML
 ```
 
-QrCode — вставляет QR\-код по заданному значению прямо в документ.
+QrCode — inserts a QR code at a specified value directly into the document.
 
-Пример использования:
+Example of use:
 
-```
-{project.code|qrcode:`right`:`top`:`8%`:`5/5`:`border`}
-```
+\{project.code|qrcode:\`right\`:\`top\`:\`8%\`:\`5/5\`:\`border\`\}
 
-Формат:
+Format:
 
-```
-{значение|qrcode:[mode]:[align]:[valign]:[crop%]:[margins]:[border]}
-```
+\{value|qrcode:\[mode\]:\[align\]:\[valign\]:\[crop%\]:\[margins\]:\[border\]\}
 
-Параметры \(все необязательные, порядок не важен\):
+Parameters \(all optional, the order is not important\):
 
-- mode — "anchor" \(по умолчанию\) или "inline" Режим вставки: плавающий \(anchor\) или встроенный в текст \(inline\).
+- mode — "anchor" \(default\) or "inline" Insertion mode: floating \(anchor\) or embedded in text \(inline\).
 
-- align — "left", "center", "right" Горизонтальное выравнивание для режима anchor \(по умолчанию "right"\).
+- align — "left", "center", "right" Horizontal alignment for anchor mode \(default is "right"\).
 
-- valign — "top", "middle", "bottom" Вертикальное выравнивание \(по умолчанию "top"\). "middle" — синоним "center".
+- valign — "top", "middle", "bottom" Vertical alignment \(default "top"\). "middle" is a synonym for "center".
 
-- \<N\>mm — размер QR\-кода в миллиметрах \(по умолчанию 32 мм\).
+\- \<N\>mm—QR code size in millimeters \(32 mm by default\).
 
-- \<N\>% — кроп \(обрезка белых полей вокруг QR\-кода\), по умолчанию 4 %.
+\- \<N\>% – crop \(crop the white margins around the QR code\), 4% by default.
 
-- margins — отступы от текста, в миллиметрах. Форматы: "5/5" — верх/низ = 5 мм, лево/право = 5 мм; "5/3/5/3" — top/right/bottom/left отдельно; "5/3/7" — top, боковые, низ.
+- margins — indents from the text, in millimeters. Formats: "5/5" — top/bottom = 5 mm, left/right = 5 mm; "5/3/5/3" \- top/right/bottom/left separately; "5/3/7" \- top, side, bottom.
 
-- border — флаг, добавляет тонкую чёрную рамку \(≈ 0.5 pt\) вокруг QR\-кода.
+\- border — a flag that adds a thin black border \(≈ 0.5 pt\) around the QR code.
 
-Возвращает:
+Returns:
 
-```
-Вставляемый XML-фрагмент <w:drawing> с сгенерированным QR-изображением.
-```
+Inserted XML fragment \<w:drawing\> with the generated QR image.
+
+Compatible with Microsoft Word, LibreOffice, OnlyOffice.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

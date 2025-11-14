@@ -5,24 +5,24 @@ import (
 	"strings"
 )
 
-// TableTemplateEngine — генератор таблиц из шаблона DOCX
+// TableTemplateEngine - Table generator from the DOCX template
 type TableTemplateEngine struct {
-	HeaderPart       string // часть таблицы до шаблонных строк
-	RowTemplate      string // шаблон основной строки
-	SubRowTemplate   string // шаблон подстроки
-	TitleRowTemplate string // шаблон заголовочной строки
-	FooterPart       string // часть таблицы после шаблонных строк
+	HeaderPart       string // part of the table before template strings
+	RowTemplate      string // main string template
+	SubRowTemplate   string // substring template
+	TitleRowTemplate string // header string template
+	FooterPart       string // part of the table after template strings
 	Rows             []string
 }
 
-// TableTemplateConfig — конфигурация индексов строк-шаблонов
+// TableTemplateConfig - Template string index configuration
 type TableTemplateConfig struct {
-	RowIndex    int // обязательный индекс строки-шаблона
-	SubRowIndex int // подстрока (если нет, то -1)
-	TitleIndex  int // заголовочная строка (если нет, то -1)
+	RowIndex    int // required index of the template string
+	SubRowIndex int // substring (if not, -1)
+	TitleIndex  int // header string (if not, -1)
 }
 
-// NewTableTemplate — создаёт генератор таблицы по конфигу
+// NewTableTemplate — creates a table generator based on the config
 func NewTableTemplate(tableXML string, cfg TableTemplateConfig) (*TableTemplateEngine, error) {
 	parts := strings.Split(tableXML, TableRowClosingTag)
 	if len(parts) == 0 {
@@ -37,7 +37,7 @@ func NewTableTemplate(tableXML string, cfg TableTemplateConfig) (*TableTemplateE
 		}
 	}
 
-	// обязательный RowTemplate
+	// required RowTemplate
 	if cfg.RowIndex < 0 || cfg.RowIndex >= len(rows) {
 		return nil, fmt.Errorf("row index %d out of range", cfg.RowIndex)
 	}
@@ -60,7 +60,7 @@ func NewTableTemplate(tableXML string, cfg TableTemplateConfig) (*TableTemplateE
 	return engine, nil
 }
 
-// AddRow — добавить обычную строку
+// AddRow — add a regular row
 func (t *TableTemplateEngine) AddRow(values ...string) {
 	row := t.RowTemplate
 	for i, v := range values {
@@ -70,7 +70,7 @@ func (t *TableTemplateEngine) AddRow(values ...string) {
 	t.Rows = append(t.Rows, row)
 }
 
-// AddSubRow — добавить подстроку
+// AddSubRow — Add substring
 func (t *TableTemplateEngine) AddSubRow(values ...string) {
 	if t.SubRowTemplate == "" {
 		return
@@ -83,7 +83,7 @@ func (t *TableTemplateEngine) AddSubRow(values ...string) {
 	t.Rows = append(t.Rows, row)
 }
 
-// AddTitleRow — добавить заголовочную строку
+// AddTitleRow — Add a header bar
 func (t *TableTemplateEngine) AddTitleRow(values ...string) {
 	if t.TitleRowTemplate == "" {
 		return
@@ -96,7 +96,7 @@ func (t *TableTemplateEngine) AddTitleRow(values ...string) {
 	t.Rows = append(t.Rows, row)
 }
 
-// Render — собрать итоговую таблицу
+// Render — collect the final table
 func (t *TableTemplateEngine) Render() string {
 	return TableOpeningTag +
 		t.HeaderPart +
@@ -105,8 +105,8 @@ func (t *TableTemplateEngine) Render() string {
 		TableEndingTag
 }
 
-// FindTemplateRows — утилита: ищет индексы строк-шаблонов.
-// Возвращает rowIdx, subRowIdx, titleIdx.
+// FindTemplateRows is a utility that searches for index scripts of template rows.
+// Returns rowIdx, subRowIdx, titleIdx.
 func FindTemplateRows(tableXML string) (int, int, int, error) {
 	rows := strings.Split(tableXML, TableRowClosingTag)
 	if len(rows) == 0 {

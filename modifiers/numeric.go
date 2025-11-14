@@ -10,9 +10,9 @@ import (
 
 // -------- Numeral --------
 
-// Numeral — числовой модификатор с морфологией (род, падеж, вариант 8, вариант нуля).
+// Numeral is a numerical modifier with morphology (gender, case, variant 8, variant zero).
 //
-// Примеры:
+// Examples:
 //
 //	{count|numeral} → "один"
 //	{count|numeral:`предложный`} → "одном"
@@ -26,20 +26,20 @@ func Numeral(v any, opts ...string) string {
 		return ""
 	}
 
-	// умолчания
+	// defaults
 	g := rusnum.Masc
 	c := rusnum.Nom
 	nullStyle := rusnum.ZeroNul
 	alt8 := false
 
-	// разбор параметров
+	// Parameter parsing
 	for _, p := range opts {
 		p = strings.ToLower(strings.TrimSpace(p))
 		if p == "" {
 			continue
 		}
 
-		// род
+		// genus
 		switch p {
 		case "м", "муж", "мужской", "masc", "m", "masculine":
 			g = rusnum.Masc
@@ -52,7 +52,7 @@ func Numeral(v any, opts ...string) string {
 			continue
 		}
 
-		// падеж
+		// maturity
 		switch p {
 		case "им", "именительный", "nom", "nominative":
 			c = rusnum.Nom
@@ -74,7 +74,7 @@ func Numeral(v any, opts ...string) string {
 			continue
 		}
 
-		// формы восьмёрки
+		// Figure-eight shapes
 		switch p {
 		case "восемью", "альт8", "альтернативная8", "alt8":
 			alt8 = true
@@ -84,7 +84,7 @@ func Numeral(v any, opts ...string) string {
 			continue
 		}
 
-		// стиль нуля
+		// Zero Style
 		switch p {
 		case "нуль", "nul", "zero-nul":
 			nullStyle = rusnum.ZeroNul
@@ -106,11 +106,11 @@ func Numeral(v any, opts ...string) string {
 
 // -------- Plural --------
 
-// Plural — склонение существительных по числу.
-// v — значение (число или строка с числом),
-// forms — три формы слова: ["сотрудник", "сотрудника", "сотрудников"].
+// Plural is the declension of nouns by number.
+// v is a value (a number or a string with a number),
+// forms — three forms of the word: ["employee", "employee", "employees"].
 //
-// Примеры:
+// Examples:
 //
 //	{count|plural:`день`:`дня`:`дней`}        → "дня"
 //	{files|plural:`файл`:`файла`:`файлов`}   → "файлов"
@@ -145,9 +145,9 @@ func Plural(v any, forms ...string) string {
 
 // -------- Sign --------
 
-// Sign — добавляет знак "+" к положительным числам.
+// Sign - Adds a "+" sign to positive numbers.
 //
-// Примеры:
+// Examples:
 //
 //	{delta|sign} → "+5"
 //	{-3|sign} → "-3"
@@ -165,9 +165,9 @@ func Sign(v any) string {
 
 // -------- PadLeft --------
 
-// PadLeft — дополняет строку слева символом до указанной длины.
+// PadLeft - Completes the string on the left with a character up to a specified length.
 //
-// Пример:
+// Example:
 //
 //	{num|pad_left:`5`:`0`} → "00042"
 func PadLeft(v any, length int, char string) string {
@@ -180,9 +180,9 @@ func PadLeft(v any, length int, char string) string {
 
 // -------- PadRight --------
 
-// PadRight — дополняет строку справа символом до указанной длины.
+// PadRight - Completes the string on the right with a character up to a specified length.
 //
-// Пример:
+// Example:
 //
 //	{num|pad_right:`3`:`0`} → "420"
 func PadRight(v any, length int, char string) string {
@@ -195,11 +195,11 @@ func PadRight(v any, length int, char string) string {
 
 // -------- Money --------
 
-// Money — форматирует число как денежное значение с разделением тысяч пробелами.
-// Поддерживает флаг "int" / "целое" для скрытия дробной части,
-// а также пользовательский формат через шаблон fmt.Sprintf.
+// Money - Formats a number as a monetary value separated by thousands of spaces.
+// Supports the "int" / "целое" flag to hide the fractional part,
+// as well as custom format via FMT template. Sprintf.
 //
-// Примеры:
+// Examples:
 //
 //	{sum|money}                    → "1 234,56"
 //	{sum|money:`int`}              → "1 234"
@@ -251,9 +251,9 @@ func Money(v any, opts ...string) string {
 
 // -------- Roman --------
 
-// Roman — переводит число в римские цифры.
+// Roman - Converts the number into Roman numerals.
 //
-// Пример:
+// Example:
 //
 //	{page|roman} → "XIV"
 func Roman(v any) string {

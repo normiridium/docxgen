@@ -297,7 +297,7 @@ func (d *Docx) ImportBuiltins() {
 	// добавляем QR сюда, чтобы несколько документов работали со своими данными, а globalMedia получал сведения о файлах
 	mods := map[string]modifiers.ModifierMeta{
 		"qrcode": {
-			Fn: func(value string, opts ...string) modifiers.RawXML {
+			Func: func(value string, opts ...string) modifiers.RawXML {
 				xmlData := d.QrCode(value, opts...)
 				globalMedia.AddAll(d.localMedia)
 				return xmlData
@@ -305,7 +305,7 @@ func (d *Docx) ImportBuiltins() {
 			Count: 0,
 		},
 		"barcode": {
-			Fn: func(value string, opts ...string) modifiers.RawXML {
+			Func: func(value string, opts ...string) modifiers.RawXML {
 				xmlData := d.Barcode(value, opts...)
 				globalMedia.AddAll(d.localMedia)
 				return xmlData
@@ -335,7 +335,7 @@ func (d *Docx) ExecuteTemplate(data map[string]any) error {
 			return fmt.Errorf("repair tags (initial): %w", err)
 		}
 
-		content = d.ResolveIncludes(content)
+		content = d.ResolveIncludes(content, data)
 		content = d.ResolveTables(content, data)
 
 		if content, err = d.RepairTags(content); err != nil {
@@ -388,7 +388,7 @@ func (d *Docx) AddModifier(name string, fn any, args int) {
 	if d.extraFuncs == nil {
 		d.extraFuncs = make(map[string]modifiers.ModifierMeta)
 	}
-	d.extraFuncs[name] = modifiers.ModifierMeta{Fn: fn, Count: args}
+	d.extraFuncs[name] = modifiers.ModifierMeta{Func: fn, Count: args}
 }
 
 // LoadFontsForPSplit подключает набор шрифтов для модификатора p_split.

@@ -7,11 +7,11 @@ import (
 	"docxgen/petrovich"
 )
 
-// Declension — склоняет ФИО в указанный падеж и формат, используя petrovich-go.
-// Если приходит строка "Фамилия Имя Отчество" — делает автоматическое склонение.
-// Если приходит map[string]string с готовыми формами — выбирает нужную.
+// Declension — declenses the full name in the specified case and format, using petrovich-go.
+// If the line "Surname, First Name, Patronymic" comes, it makes an automatic declension.
+// If a map[string]string comes with ready-made forms, it selects the desired one.
 //
-// Примеры:
+// Examples:
 //
 //	{user_fio|declension:`предложный`:`ф и о`} = "Иванову Ивану Ивановичу"
 //	{user_fio|declension:`дательный`:`фамилия и.о.`} = "Сидорову И.П."
@@ -23,7 +23,7 @@ func Declension(v any, opts ...string) string {
 		return ""
 	}
 
-	// параметры: падеж и формат
+	// Parameters: case and format
 	caseName := "родительный"
 	format := ""
 	if len(opts) >= 1 && strings.TrimSpace(opts[0]) != "" {
@@ -33,20 +33,20 @@ func Declension(v any, opts ...string) string {
 		format = strings.ToLower(strings.TrimSpace(opts[1]))
 	}
 
-	// если дали готовые формы
+	// if they gave ready-made forms
 	if m, ok := v.(map[string]string); ok {
 		first, last, middle := pickPrepared(m, caseName)
 		return formatFIO(first, last, middle, format)
 	}
 
-	// иначе используем petrovich
+	// Otherwise, we use petrovich
 	p, _ := petrovich.LoadRules()
 	parts := strings.Fields(src)
 	if len(parts) == 0 {
 		return src
 	}
 
-	// определяем род по отчеству
+	// Determining the gender by patronymic
 	gender := petrovich.Androgynous
 	if len(parts) == 3 {
 		if strings.HasSuffix(parts[2], "ич") {
@@ -75,7 +75,7 @@ func Declension(v any, opts ...string) string {
 		}
 	}
 
-	// склоняем каждую часть
+	// Decline each part
 	last, first, middle := "", "", ""
 	switch len(parts) {
 	case 1:
@@ -109,11 +109,11 @@ func petrovichCase(c string) petrovich.Case {
 	}
 }
 
-// форматирование по токенам
+// Formatting by tokens
 func formatFIO(first, last, middle, format string) string {
 	trim := func(s string) string { return strings.TrimSpace(s) }
 
-	// если формат пустой — по умолчанию "ф и о"
+	// if the format is empty, the default is "ф и о"
 	if strings.TrimSpace(format) == "" {
 		out := strings.TrimSpace(strings.Join([]string{trim(last), trim(first), trim(middle)}, " "))
 		out = strings.Join(strings.Fields(out), " ")
@@ -158,7 +158,7 @@ func formatFIO(first, last, middle, format string) string {
 
 func pickPrepared(m map[string]string, caseName string) (first, last, middle string) {
 	c := normalizeCase(caseName)
-	// ключи вида first_gen, last_dat, middle_ins и т.п.
+	// Keys types: first_gen, last_dat, middle_ins и т.п.
 	first = coalesce(m["first_"+c], m["first_nom"], m["first"])
 	last = coalesce(m["last_"+c], m["last_nom"], m["last"], m["surname_"+c], m["surname"])
 	middle = coalesce(m["middle_"+c], m["middle_nom"], m["middle"], m["patronymic_"+c], m["patronymic"])
@@ -190,6 +190,6 @@ func normalizeCase(c string) string {
 	case "пред", "предложный", "prep", "prepositional", "п":
 		return "prep"
 	default:
-		return "gen" // умолчание — родительный
+		return "gen" // Default is genitive
 	}
 }

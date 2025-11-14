@@ -14,8 +14,8 @@ import (
 	"github.com/boombuler/barcode/ean"
 )
 
-// Barcode — вставляет штрихкод (Code128, EAN13) в документ.
-// Поддерживает crop (%), margins (x/y), inline/anchor и относительные размеры (% от страницы).
+// Barcode - Inserts a barcode (Code128, EAN13) into a document.
+// Supports crop (%), margins (x/y), inline/anchor, and relative sizes (% of page).
 func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 	if value == "" {
 		return ""
@@ -23,7 +23,7 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 
 	const emuPerMM = 36000
 
-	// ---------- дефолтные параметры ----------
+	// ---------- Default parameters ----------
 	codeType := "code128"
 	mode := "anchor"
 	align := "right"
@@ -34,10 +34,10 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 	hasBorder := false
 	distT, distB, distL, distR := 0, 0, 0, 0
 
-	// ---------- размеры страницы (для % вычислений) ----------
+	// ---------- Page Dimensions (for % Calculations) ----------
 	pageW, pageH := d.GetPageSizeEMU()
 
-	// ---------- парсим опции ----------
+	// ---------- Parsing options ----------
 	for _, token := range opts {
 		token = strings.TrimSpace(token)
 		switch {
@@ -58,7 +58,7 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 			valign = token
 
 		case strings.HasSuffix(token, "%"):
-			// crop или относительные размеры
+			// crop or relative dimensions
 			if strings.Contains(token, "*") {
 				break
 			}
@@ -66,7 +66,7 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 				crop = v
 			}
 
-		case strings.Contains(token, "/"): // отступы
+		case strings.Contains(token, "/"): // padding
 			parts := strings.Split(token, "/")
 			switch len(parts) {
 			case 2:
@@ -105,7 +105,7 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 			}
 
 		case strings.HasSuffix(token, "mm"):
-			// размеры (возможно a*b)
+			// Dimensions (possibly A*B)
 			if strings.Contains(token, "*") {
 				parts := strings.Split(token, "*")
 				if len(parts) == 2 {
@@ -117,7 +117,7 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 			}
 
 		case strings.Contains(token, "*") && (strings.HasSuffix(token, "%")):
-			// вариант с процентами (например 80%*10mm)
+			// Option with percentages (e.g. 80%*10mm)
 			parts := strings.Split(token, "*")
 			if len(parts) == 2 {
 				sizeWMM = parseMMorPercent(parts[0], pageW)
@@ -132,7 +132,7 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 		}
 	}
 
-	// ---------- генерим картинку ----------
+	// ---------- Generating an image ----------
 	var img barcode.Barcode
 	var err error
 	switch codeType {
@@ -145,13 +145,13 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 		return modifiers.RawXML(fmt.Sprintf("<w:p><w:t>barcode error: %v</w:t></w:p>", err))
 	}
 
-	// ---------- масштабируем ----------
+	// ---------- scalable ----------
 	if sizeHMM <= 0 {
 		sizeHMM = sizeWMM / 3
 		img, _ = barcode.Scale(img, int(sizeWMM*12), int(sizeHMM*12))
 	} else {
-		// если задано явно — оставляем исходный баркод,
-		// чтобы сохранить чёткость и не ломать aspect ratio
+		// if it is set explicitly, leave the original barcode,
+		// to maintain clarity and not break the aspect ratio
 		img, _ = barcode.Scale(img, img.Bounds().Dx(), img.Bounds().Dy())
 	}
 	buf, _ := encodePNG(img)
@@ -213,8 +213,8 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 	return modifiers.RawXML("</w:t></w:r><w:r>" + xml + "</w:r><w:r><w:t>")
 }
 
-// parseMMorPercent — парсит строку вроде "40mm" или "80%" в миллиметры,
-// используя размеры страницы в EMU для вычисления процентов.
+// parseMMorPercent — parses a string like "40mm" or "80%" in millimeters,
+// using page sizes in the EMU to calculate percentages.
 func parseMMorPercent(token string, pageSizeEMU int) float64 {
 	token = strings.TrimSpace(token)
 	switch {
@@ -231,7 +231,7 @@ func parseMMorPercent(token string, pageSizeEMU int) float64 {
 	}
 }
 
-// GetPageSizeEMU — получает размеры страницы из document.xml в EMU.
+// GetPageSizeEMU — gets page sizes from document.xml in EMU.
 func (d *Docx) GetPageSizeEMU() (width, height int) {
 	data, ok := d.files["word/document.xml"]
 	if !ok {
@@ -264,7 +264,7 @@ func extractAttrInt(xml, tag, attr string) int {
 	return val
 }
 
-// encodePNG кодирует image.Image в PNG и возвращает []byte.
+// encodePNG encodes image.Image to PNG and returns []byte.
 func encodePNG(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {

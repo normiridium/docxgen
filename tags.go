@@ -13,12 +13,12 @@ import (
 )
 
 // ============================================================================
-//  Раздел: Обработка параграфов и маркеров Word XML
+// Topic: Processing Word XML Paragraphs and Bullets
 // ============================================================================
 
-// ReplaceTagWithParagraph — заменяет параграф, содержащий {tag}, на XML-фрагмент.
-// Если тег был единственным содержимым — параграф просто вырезается.
-// Если в параграфе был текст до или после тега, они превращаются в отдельные <w:p>.
+// ReplaceTagWithParagraph - Replaces the paragraph containing {tag} with an XML fragment.
+// If the tag was the only content, the paragraph is simply cut out.
+// If the paragraph had text before or after the tag, they turn into separate <w:p>.
 func ReplaceTagWithParagraph(body, tag, content string) string {
 	const (
 		openTag  = "<w:p>"
@@ -35,6 +35,7 @@ func ReplaceTagWithParagraph(body, tag, content string) string {
 			break
 		}
 		start += pos
+
 		end := strings.Index(body[start:], closeTag)
 		if end < 0 {
 			out.WriteString(body[pos:])
@@ -45,15 +46,14 @@ func ReplaceTagWithParagraph(body, tag, content string) string {
 		paragraph := body[start:end]
 		text := extractParagraphText(paragraph)
 
-		// если тег не найден — просто копируем параграф
+		// тег НЕ найден: просто копируем как есть
 		if !strings.Contains(text, tag) {
 			out.WriteString(body[pos:end])
 			pos = end
 			continue
 		}
 
-		// если в параграфе только тег — вставляем контент без обертки
-		// (никаких <w:p> вокруг)
+		// тег найден - обрабатываем
 		if strings.TrimSpace(text) == tag {
 			out.WriteString(body[pos:start])
 			out.WriteString(content)
@@ -63,6 +63,7 @@ func ReplaceTagWithParagraph(body, tag, content string) string {
 
 		// иначе делим текст на before/after и строим параграфы
 		before, after, _ := strings.Cut(text, tag)
+
 		out.WriteString(body[pos:start])
 
 		if strings.TrimSpace(before) != "" {
@@ -85,26 +86,56 @@ func ReplaceTagWithParagraph(body, tag, content string) string {
 	return out.String()
 }
 
-// extractParagraphText — быстро вытаскивает текст из <w:t> без полных XML-разборов.
+// extractParagraphText — Quickly pulls text out of <w:t> without full XML parsing.
 func extractParagraphText(p string) string {
 	var b strings.Builder
+
 	for {
-		start := strings.Index(p, "<w:t>")
-		if start < 0 {
+		idx1 := strings.Index(p, "<w:t>")
+		idx2 := strings.Index(p, "<w:t ")
+
+		// Select the nearest one
+		startTag := -1
+		if idx1 >= 0 && idx2 >= 0 {
+			if idx1 < idx2 {
+				startTag = idx1
+			} else {
+				startTag = idx2
+			}
+		} else if idx1 >= 0 {
+			startTag = idx1
+		} else if idx2 >= 0 {
+			startTag = idx2
+		} else {
 			break
 		}
-		start += len("<w:t>")
-		end := strings.Index(p[start:], "</w:t>")
-		if end < 0 {
+
+		// Looking for closing the '>' tag
+		tagClose := strings.Index(p[startTag:], ">")
+		if tagClose < 0 {
 			break
 		}
-		b.WriteString(p[start : start+end])
-		p = p[start+end+len("</w:t>"):]
+		tagClose += startTag
+
+		// Looking for </w:t>
+		endTag := strings.Index(p[tagClose:], "</w:t>")
+		if endTag < 0 {
+			break
+		}
+		endTag += tagClose
+
+		// text between tags
+		text := p[tagClose+1 : endTag]
+		b.WriteString(text)
+
+		// moving on
+		p = p[endTag+len("</w:t>"):]
 	}
+
 	return b.String()
 }
 
-// xmlEscape — экранирует &, <, > и кавычки для вставки в XML.
+// xmlEscape — escapes &, <, >, and quotes to insert into XML.
 func xmlEscape(s string) string {
 	return strings.NewReplacer(
 		"&", "&amp;",
@@ -116,10 +147,10 @@ func xmlEscape(s string) string {
 }
 
 // ============================================================================
-//  Раздел: Unwrap и восстановление разорванных тегов
+// Section: Unwrap and Repair Broken Tags
 // ============================================================================
 
-// ProcessUnWrapParagraphTags — ищет {*tag*} и превращает в блочные {tag}.
+// ProcessUnWrapParagraphTags - Looks for {*tag*} and turns it into block {tags}.
 func (d *Docx) ProcessUnWrapParagraphTags(body string) string {
 	for {
 		start := strings.Index(body, "{*")
@@ -137,7 +168,7 @@ func (d *Docx) ProcessUnWrapParagraphTags(body string) string {
 	}
 }
 
-// RepairTags — восстанавливает {tag} и [include] после того, как Word порвал их на <w:t>.
+// RepairTags — restores {tag} and [include] after Word tore them at <w:t>.
 func (d *Docx) RepairTags(body string) (string, error) {
 	var b strings.Builder
 	inCurly, inSquare := false, false
@@ -184,14 +215,14 @@ func (d *Docx) RepairTags(body string) (string, error) {
 	return b.String(), nil
 }
 
-// ============================================================================
-//  Раздел: [include/...]
+//============================================================================
+// Раздел: [included/..]
 //
-//  Поддержка вставок дочерних DOCX-фрагментов:
-//  [include/file.docx], [include/file.docx/table/2], [include/file.docx/p/3]
-// ============================================================================
+// Поддержка вставок дочерних docs-фрагментов:
+// [include/file.docs], [include/file.docs/table/2], [include/file.docs/p/3]
+//============================================================================
 
-func (d *Docx) ResolveIncludes(body string) string {
+func (d *Docx) ResolveIncludes(body string, data map[string]any) string {
 	for {
 		start := strings.Index(body, "[include/")
 		if start < 0 {
@@ -204,7 +235,7 @@ func (d *Docx) ResolveIncludes(body string) string {
 		end += start + 1
 
 		raw := body[start:end]
-		spec, err := ParseBracketIncludeTag(raw)
+		spec, err := ParseBracketIncludeTag(raw, data)
 		if err != nil {
 			body = body[:start] + body[end:]
 			continue
@@ -262,7 +293,7 @@ func (d *Docx) openFragmentDoc(rel string) (*Docx, error) {
 	return Open(full)
 }
 
-// --- извлечение фрагментов ---
+// --- extracting fragments ---
 func GetBodyFragment(content string) (string, error) {
 	a := strings.Split(content, BodyOpeningTag)
 	if len(a) < 2 {
@@ -275,7 +306,7 @@ func GetBodyFragment(content string) (string, error) {
 	return b[0], nil
 }
 
-// GetTableN — получить n-ую таблицу (нумерация с 1)
+// GetTableN — get the n table numbered with 1
 func GetTableN(content string, n int) (string, error) {
 	if n <= 0 {
 		return "", fmt.Errorf("include: bad table index")
@@ -308,7 +339,7 @@ func GetParagraphN(content string, n int) (string, error) {
 	return ParagraphOpeningTag + parts[idx] + ParagraphPartTag, nil
 }
 
-// --- структура описания include ---
+// --- description structure include ---
 type BracketIncludeSpec struct {
 	RawTag   string
 	File     string
@@ -316,12 +347,20 @@ type BracketIncludeSpec struct {
 	Index    int
 }
 
-// ParseBracketIncludeTag — парсит строку вида "[include/file.docx/table/2]" без регулярок.
-func ParseBracketIncludeTag(tag string) (BracketIncludeSpec, error) {
+// ParseBracketIncludeTag — parses a string like "[include/file.docx/table/2]" without regexp.
+func ParseBracketIncludeTag(tag string, data map[string]any) (BracketIncludeSpec, error) {
 	spec := BracketIncludeSpec{
 		RawTag:   tag,
 		Fragment: "body",
 		Index:    1,
+	}
+
+	// local spoofing var inside the include path
+	for k, v := range data {
+		placeholder := "%" + k + "%"
+		if strings.Contains(tag, placeholder) {
+			tag = strings.ReplaceAll(tag, placeholder, fmt.Sprint(v))
+		}
 	}
 
 	tag = strings.TrimSpace(tag)
@@ -335,7 +374,7 @@ func ParseBracketIncludeTag(tag string) (BracketIncludeSpec, error) {
 		return spec, fmt.Errorf("invalid include marker")
 	}
 
-	// ищем сегмент с .docx
+	// looking for a segment with docx
 	idxDocx := -1
 	for i := 1; i < len(parts); i++ {
 		if strings.HasSuffix(strings.ToLower(parts[i]), ".docx") {
@@ -347,7 +386,7 @@ func ParseBracketIncludeTag(tag string) (BracketIncludeSpec, error) {
 		return spec, fmt.Errorf("include: .docx not found")
 	}
 
-	// собираем путь к файлу
+	// assembling the path to the file
 	fileSegments := parts[1 : idxDocx+1]
 	filePath := path.Clean(path.Join(fileSegments...))
 	if filePath == "." || filePath == "" {
@@ -355,7 +394,7 @@ func ParseBracketIncludeTag(tag string) (BracketIncludeSpec, error) {
 	}
 	spec.File = filePath
 
-	// разбираем остаток (фрагмент)
+	// Dismantling the remainder (fragment)
 	rest := parts[idxDocx+1:]
 	if len(rest) == 0 {
 		return spec, nil
@@ -390,16 +429,16 @@ func ParseBracketIncludeTag(tag string) (BracketIncludeSpec, error) {
 }
 
 // ============================================================================
-// ProcessTrimTags — чистит {~} и {-} с учётом соседних <w:t> и корректных пробелов
+// ProcessTrimTags - Cleans up {~} and {-} with neighboring <w:t> and valid spaces
 // ============================================================================
 
-// ProcessTrimTags — убирает пробелы, табы и переносы вокруг {~}/{-}, не ломая структуру Word.
+// ProcessTrimTags — removes spaces, tabs, and hyphenation around {~}/{-} without breaking the structure of Word.
 func (d *Docx) ProcessTrimTags(body string) string {
-	// 1. Подмена спец-тегов на символы
+	// 1. substitution of special tags with symbols
 	body = strings.ReplaceAll(body, "<w:tab/>", "<w:t>\t</w:t>")
 	body = strings.ReplaceAll(body, "<w:br/>", "<w:t>\n</w:t>")
 
-	// 2. Разбиваем на параграфы
+	// 2. breaking it down into paragraphs
 	parts := strings.Split(body, "<w:p>")
 	if len(parts) == 1 {
 		return body // нет параграфов
@@ -413,13 +452,13 @@ func (d *Docx) ProcessTrimTags(body string) string {
 		}
 		content := p[:end]
 
-		// фильтр: чистим только если в параграфе есть {~ или {-
+		// filter: clean only if the paragraph contains {~ or {-
 		if !strings.Contains(content, "{~") && !strings.Contains(content, "{-") &&
 			!strings.Contains(content, "~}") && !strings.Contains(content, "-}") {
 			continue
 		}
 
-		// 3. Работаем внутри параграфа как раньше — построчно по <w:r>
+		// 3. Work inside the paragraph as before — line by line according to <w:r>
 		reRun := regexp.MustCompile(`(?s)<w:r>.*?</w:r>`)
 		content = reRun.ReplaceAllStringFunc(content, func(run string) string {
 			reT := regexp.MustCompile(`(?s)<w:t[^>]*>.*?</w:t>`)
@@ -434,7 +473,7 @@ func (d *Docx) ProcessTrimTags(body string) string {
 			}
 			clean := cleanTrimTags(buf.String())
 
-			// 4. Восстанавливаем спец-теги, не ломая структуру XML
+			// 4. We restore special tags without breaking the XML structure
 			var out strings.Builder
 			out.WriteString("<w:r>")
 			out.WriteString("<w:t>")
@@ -483,7 +522,7 @@ func (d *Docx) ProcessTrimTags(body string) string {
 	return strings.Join(parts, "<w:p>")
 }
 
-// cleanTrimTags — удаляет пробелы, табы и переносы вокруг {~}/{-}, корректируя пробелы.
+// cleanTrimTags — removes spaces, tabs, and hyphens around {~}/{-} by correcting spaces.
 func cleanTrimTags(s string) string {
 	// {~...~} — ест всё
 	s = regexp.MustCompile(`[\s]*\{~`).ReplaceAllString(s, "{")
@@ -501,7 +540,7 @@ func cleanTrimTags(s string) string {
 	return s
 }
 
-// extractText — достаёт текст из <w:t ...>...</w:t>.
+// extractText — Pulls out the text from <w:t ...>...</w:t>.
 func extractText(xml string) string {
 	start := strings.Index(xml, ">")
 	if start == -1 {
@@ -513,4 +552,15 @@ func extractText(xml string) string {
 	}
 	end += start
 	return xml[start+1 : end]
+}
+
+func expandVars(s string, data map[string]any) string {
+	// Look for %var% and substitute the value from the data
+	for k, v := range data {
+		placeholder := "%" + k + "%"
+		if strings.Contains(s, placeholder) {
+			s = strings.ReplaceAll(s, placeholder, fmt.Sprint(v))
+		}
+	}
+	return s
 }

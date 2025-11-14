@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// DateFormat — форматирует дату по шаблону Go (например, "02.01.2006").
+// DateFormat - Formats the date according to the Go pattern (for example, "01/02/2006").
 //
-// Примеры:
+// Examples:
 //
 //	{project.deadline|date_format:`02.01.2006`} → "01.03.2026"
 //	{created_at|date_format:`02.01.2006 15:04`} → "14.10.2025 08:30"

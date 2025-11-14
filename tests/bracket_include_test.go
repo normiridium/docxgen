@@ -13,6 +13,7 @@ func TestParseBracketIncludeTag_OK(t *testing.T) {
 		index    int
 	}{
 		"[include/a.docx]":         {"include/a.docx", "a.docx", "body", 1},
+		"[include/a_%lang%.docx]":  {"include/a_rus.docx", "a_rus.docx", "body", 1},
 		"[include/a.docx/body]":    {"include/a.docx/body", "a.docx", "body", 1},
 		"[include/a.docx/table]":   {"include/a.docx/table", "a.docx", "table", 1},
 		"[include/a.docx/table/3]": {"include/a.docx/table/3", "a.docx", "table", 3},
@@ -20,7 +21,9 @@ func TestParseBracketIncludeTag_OK(t *testing.T) {
 	}
 
 	for raw, want := range tests {
-		spec, err := docxgen.ParseBracketIncludeTag(raw)
+		spec, err := docxgen.ParseBracketIncludeTag(raw, map[string]any{
+			"lang": "rus",
+		})
 		if err != nil {
 			t.Fatalf("unexpected error for %s: %v", raw, err)
 		}
@@ -36,7 +39,7 @@ func TestParseBracketIncludeTag_Fail(t *testing.T) {
 		"[include/a.docx/table/0]", "[include/a.docx/p/-1]", "random",
 	}
 	for _, raw := range bad {
-		if _, err := docxgen.ParseBracketIncludeTag(raw); err == nil {
+		if _, err := docxgen.ParseBracketIncludeTag(raw, nil); err == nil {
 			t.Errorf("expected error for %s", raw)
 		}
 	}

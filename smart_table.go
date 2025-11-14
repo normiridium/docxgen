@@ -11,61 +11,62 @@ import (
 // Optional: Resolve [table name] ... </w:tbl> blocks against data[name]
 // ============================================================================
 
-// ResolveTables — находит блоки вида:
+// ResolveTables — finds blocks of the form:
 //
-//	[table/name]
+// [table/name]
+//
 //	<w:tbl>...</w:tbl>
 //	[/table]
 //
-// и заменяет их на результат RenderSmartTable(...), используя items из data[name].
+// and replaces them with the result of RenderSmartTable(...) using items from data[name].
 //
-// Вариант A (как договорились):
-//   - если данных нет — таблицу оставляем как есть,
-//     но абзацы с маркерами [table/...] и [/table] удаляем.
-//   - если данные есть — подставляем отрендеренную таблицу на место абзаца с [table/...],
-//     абзац с [/table] удаляем, исходную таблицу из блока вырезаем.
+// Option A (as agreed):
+//   - if there is no data, leave the table as it is,
+//     However, the paragraphs with the [table/...] and [/table] markers are removed.
+//   - if there is data, substitute the rendered table in place of the paragraph with [table/...],
+//     Delete the paragraph with [/table], cut out the original table from the block.
 //
-// Работает без регулярок, в стиле ResolveIncludes.
+// It works without regulars, in the ResolveIncludes style.
 func (d *Docx) ResolveTables(body string, data map[string]any) string {
 	const openPrefix = "[table/"
 	const closeTag = "[/table]"
 
 	for {
-		// 1) ищем открывающий маркер
+		// 1) Looking for the opening marker
 		start := strings.Index(body, openPrefix)
 		if start < 0 {
 			break
 		}
 
-		// ищем конец открывающего тега ']'
+		// 2) Looking for the end of the opening ']' tag
 		openEnd := strings.Index(body[start:], "]")
 		if openEnd < 0 {
-			// битая разметка — удалим маркерный абзац и выйдем
+			// broken markup — delete the bullet paragraph and exit
 			body = ReplaceTagWithParagraph(body, body[start:], "")
 			break
 		}
 		openEnd = start + openEnd + 1
 
-		openTag := body[start:openEnd] // например: [table/budget_report]
+		openTag := body[start:openEnd] // For example: [table/budget_report]
 		name := strings.TrimSuffix(strings.TrimPrefix(openTag, openPrefix), "]")
 
-		// 2) ищем закрывающий маркер [/table] ПОСЛЕ открывающего
+		// 3) look for the closing marker [/table] AFTER the opening
 		closePos := strings.Index(body[openEnd:], closeTag)
 		if closePos < 0 {
-			// нет закрывающего — просто удалим абзац с открывающим маркером
+			// if there is no closing marker, just delete the paragraph with the opening marker
 			body = ReplaceTagWithParagraph(body, openTag, "")
 			break
 		}
 		closePos = openEnd + closePos
 
-		// 3) содержимое между маркерами
+		// 4) content between markers
 		inner := body[openEnd:closePos]
 
-		// 4) найдём первую таблицу внутри блока
+		// 5) Let's find the first table inside the block
 		tblStart := strings.Index(inner, "<w:tbl")
 		tblEnd := strings.Index(inner, "</w:tbl>")
 		if tblStart < 0 || tblEnd < 0 {
-			// таблицы нет — удалим оба маркера и двинемся дальше
+			// There is no table, so remove both markers and move on
 			body = ReplaceTagWithParagraph(body, closeTag, "")
 			body = ReplaceTagWithParagraph(body, openTag, "")
 			continue
@@ -73,43 +74,43 @@ func (d *Docx) ResolveTables(body string, data map[string]any) string {
 		tblEnd += len("</w:tbl>")
 		tableXML := inner[tblStart:tblEnd]
 
-		// 5) подготовим исходник без блоков, если понадобится
-		// (удалим закрывающий маркерный абзац сразу — он нам точно не нужен)
+		// 6) prepare the source code without blocks, if necessary
+		// (let's remove the closing bullet paragraph right away — we definitely don't need it)
 		body = ReplaceTagWithParagraph(body, closeTag, "")
 
-		// 6) проверим наличие данных
+		// 7) Let's check the availability of data
 		raw, ok := data[name]
 		if !ok {
-			// Данных нет → оставить таблицу как есть, только убрать маркеры:
+			// There is no data → leave the table as it is, only remove the markers:
 			body = ReplaceTagWithParagraph(body, openTag, "")
-			// (исходная таблица остаётся на месте между абзацами)
+			// (the original table remains in place between paragraphs)
 			continue
 		}
 
-		// 7) нормализуем items и рендерим
+		// 8) normalize items and render
 		items, ok := normalizeItems(raw)
 		if !ok {
-			// некорректный формат данных — оставляем исходную таблицу, убрав маркеры
+			// Incorrect data format — leave the original table, removing the markers
 			body = ReplaceTagWithParagraph(body, openTag, "")
 			continue
 		}
 
 		rendered, err := RenderSmartTable(tableXML, items)
 		if err != nil || strings.TrimSpace(rendered) == "" {
-			// не получилось — оставим исходную таблицу, откроющий маркерный абзац уберём
+			// If it doesn't work, we'll keep the original table, and remove the opening bullet paragraph
 			body = ReplaceTagWithParagraph(body, openTag, "")
 			continue
 		}
 
-		// 8) удалим из документа исходную таблицу (первое вхождение в пределах блока)
-		//    Так как мы ещё не трогали сам inner, tableXML в тексте всё ещё существует.
-		//    Удаляем РОВНО одно вхождение, чтобы не задеть другие таблицы.
+		// 9) delete the source table from the document (the first occurrence within the block)
+		// Since we haven't touched inner itself yet, tableXML in the text still exists.
+		// Remove EXACTLY one occurrence so as not to touch other tables.
 		body = strings.Replace(body, tableXML, "", 1)
 
-		// 9) подставим отрендеренную таблицу вместо абзаца с открывающим маркером
+		// 10) Substitute a rendered table instead of a paragraph with an opening marker
 		body = ReplaceTagWithParagraph(body, openTag, rendered)
 
-		// 10) цикл продолжится — ищем следующий [table/...]
+		// 11) The cycle will continue — looking for the next one [table/...]
 	}
 
 	return body
@@ -156,19 +157,19 @@ func normalizeItems(v any) ([]any, bool) {
 }
 
 /*
-КАНОН:
+ CANON:
 
-• Порядок строк = порядок данных (DATA диктует порядок).
-• DOCX — библиотека форм: уникальные шаблонные строки (named/positional),
-  HEADER (до первой шаблонной строки) и FOOTER (после последней).
-• Matching: Pass#1 (биндинг key→template), Pass#2 (waitZone retry), Pass#3 (bucket fields union).
-• Render: идём ПО ДАННЫМ, для каждого item используем закреплённый шаблон и правила подстановки:
-    L1  — локальное поле из item
-    L2  — если поле встречалось в bucket (union), но в item его нет → подставляем "" (E1)
-    L3  — если поле глобальное → оставляем {name} как есть, ExecuteTemplate потом разберёт
-    L4  — если нигде нет → оставляем {name} как есть
-• Positional: 1 item slice → 1 строка шаблона; %[N]s и {`%[N]s`|mod} поддержаны.
-• Backticks сохраняем обязательно.
+• Row order = data order (DATA dictates the order).
+• DOCX — form library: unique template strings (named/positional),
+  HEADER (before the first placeholder line) and FOOTER (after the last).
+• Matching: Pass#1 (key→template binding), Pass#2 (waitZone retry), Pass#3 (bucket fields union).
+• Render: Go BY DATA, use a pinned template and substitution rules for each item:
+    L1 is the local field from item
+    L2 — if the field was found in bucket (union), but it is not in item → substitute "" (E1)
+    L3 — if the global field → leave {name} as is, ExecuteTemplate will parse the
+    L4 — if it's nowhere → leave {name} as it is
+• Positional: 1 item slice → 1 template line; %[N]s and {'%[N]s'|mod} are supported.
+• Backticks must be saved.
 */
 
 // ============================================================================
@@ -189,7 +190,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 		return "", fmt.Errorf("smart table: no rows found")
 	}
 
-	// 1) Разметим строки таблицы: header / templateRows / footer
+	// 1) Mark up the rows of the table: header / templateRows / footer
 	type tplRow struct {
 		idx      int
 		xml      string
@@ -232,7 +233,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 		}
 	}
 
-	// Коллекция только шаблонных строк (named/positional) — библиотека форм
+	// Named/positional Only Collection - Form Library
 	var templates []tplRow
 	for _, tr := range tplRows {
 		if tr.isNamed || tr.isPos {
@@ -248,27 +249,27 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 	for _, it := range items {
 		ni := normalizeItem(it)
 		if ni.kind == "other" {
-			// одиночные скаляры не поддерживаем как осмысленные строки (оставим на будущее)
+			// Single scalars are not supported as meaningful strings (we'll leave them for later)
 			continue
 		}
 		nitems = append(nitems, ni)
 	}
 	if len(nitems) == 0 {
-		// только header+footer
+		// only header+footer
 		return TableOpeningTag + strings.Join(headerRows, "") + strings.Join(footerRows, "") + TableEndingTag, nil
 	}
 
-	// 3) Matching Phase#1: биндинг key→template, плюс waitZone
+	// 3) Matching Phase#1: key→template binding, plus waitZone
 	binding := make(map[string]int)      // groupKey -> templates[idx]
-	assigned := make([]int, len(nitems)) // по индексу item -> индекс templates, либо -1 (skip) либо -2 (wait)
+	assigned := make([]int, len(nitems)) // either -1 (skip) or -2 (wait)
 	for i := range assigned {
-		assigned[i] = -2 // по умолчанию в "ожидании"
+		assigned[i] = -2 // Default in "wait"
 	}
 	type bucket struct {
 		tplIdx int
-		items  []int // индексы nitems
+		items  []int // indices nitems
 	}
-	// buckets по индексу шаблона
+	// buckets by template index
 	buckets := make([]bucket, len(templates))
 	for i := range buckets {
 		buckets[i] = bucket{tplIdx: i}
@@ -280,23 +281,23 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 		for i, t := range templates {
 			sc := 0
 			if it.kind == "map" && t.isNamed {
-				// score = число совпавших полей
+				// score = Number of matched fields
 				for _, name := range t.meta.names {
 					if _, ok := it.mapVal[name]; ok {
 						sc++
 					}
 				}
 			} else if it.kind == "slice" && t.isPos {
-				// score по близости количества %[N]s
+				// score by proximity to quantity %[N]s
 				seen := t.meta.percentSeen
 				diff := seen - len(it.sliceVal)
 				if diff < 0 {
 					diff = -diff
 				}
 				if seen == len(it.sliceVal) {
-					sc = 1000 + seen // идеал
+					sc = 1000 + seen // ideal
 				} else {
-					sc = 100 - diff // чем ближе — тем выше
+					sc = 100 - diff // The closer you are, the higher
 				}
 			}
 			if sc > bestScore {
@@ -313,7 +314,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 	// Pass #1
 	waitZone := []int{}
 	for idx, it := range nitems {
-		// если уже есть биндинг на группу — используем его сразу
+		// If there is already a binding for the group, use it immediately
 		if it.groupKey != "" {
 			if b, ok := binding[it.groupKey]; ok {
 				assigned[idx] = b
@@ -326,7 +327,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 		if sc > 0 {
 			assigned[idx] = tplIdx
 			buckets[tplIdx].items = append(buckets[tplIdx].items, idx)
-			// фиксируем биндинг для группы
+			// Fixing the binding for the group
 			if it.groupKey != "" {
 				binding[it.groupKey] = tplIdx
 			}
@@ -339,7 +340,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 	if len(waitZone) > 0 {
 		for _, idx := range waitZone {
 			it := nitems[idx]
-			// если после первого прохода биндинг для группы появился — кидаем туда
+			// If after the first pass there is binding for the group, throw it there
 			if it.groupKey != "" {
 				if b, ok := binding[it.groupKey]; ok {
 					assigned[idx] = b
@@ -347,7 +348,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 					continue
 				}
 			}
-			// иначе ещё раз пробуем подобрать шаблон
+			// Otherwise, we try to choose a template again
 			tplIdx, sc := tryMatch(it)
 			if sc > 0 {
 				assigned[idx] = tplIdx
@@ -356,13 +357,13 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 					binding[it.groupKey] = tplIdx
 				}
 			} else {
-				// B-логика: не подошёл — пропускаем
+				// Logic: if it doesn't fit, we let it pass
 				assigned[idx] = -1
 			}
 		}
 	}
 
-	// Pass #3 — нормализация дырок внутри каждого bucket (union полей)
+	// Pass #3 — normalizing holes inside each bucket (union fields)
 	// unionFields[tplIdx] -> set of names seen in bucket for named rows
 	unionFields := make([]map[string]struct{}, len(templates))
 	for i := range unionFields {
@@ -380,7 +381,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 		}
 	}
 
-	// 4) Генерация результата: HEADER + (по данным) + FOOTER
+	// 4) Result generation: HEADER + (based on data) + FOOTER
 	var outRows []string
 	if len(headerRows) > 0 {
 		outRows = append(outRows, headerRows...)
@@ -417,15 +418,15 @@ func metaHasAnyKnown(meta tplMeta, known map[string]struct{}) bool {
 	return false
 }
 
-// collectLocalKeys вытаскивает имена локальных полей из входных items.
-// Смотрим {"group": { ... }} и плоские map[string]any без слайсов.
+// collectLocalKeys pulls the names of local fields from the input items.
+// Look at {"group": { ... }} and flat map[string]any without slices.
 func collectLocalKeys(items []any) map[string]struct{} {
 	keys := make(map[string]struct{})
 	for _, it := range items {
 		switch m := it.(type) {
 
 		case map[string]any:
-			// {"group": {...}} → берём ключи из inner map
+			// {"group": {...}} = Taking the keys from the Inner Map
 			if len(m) == 1 {
 				for _, v := range m {
 					if inner, ok := v.(map[string]any); ok {
@@ -437,7 +438,7 @@ func collectLocalKeys(items []any) map[string]struct{} {
 				break
 			}
 
-			// плоский map без слайсов → тоже считаем локальными ключами
+			// Flat map without slices = also considered local keys
 			flat := true
 			for _, v := range m {
 				switch v.(type) {
@@ -459,10 +460,10 @@ func collectLocalKeys(items []any) map[string]struct{} {
 // Rendering helpers
 // ============================================================================
 
-// L1/L2-bucket/L3-global/L4-leave реализация:
-// - если name в data → подставляем
-// - иначе если name присутствует в union (встречался в других item’ах bucket’а) → подставляем ""
-// - иначе оставляем как есть (глобальные теги обработает ExecuteTemplate)
+// L1/L2-bucket/L3-global/L4-leave implementation:
+// - if the name in the data → is substituted
+// - otherwise, if the name is present in union (found in other bucket items) → substitute ""
+// - otherwise leave it as it is (global tags will be handled by ExecuteTemplate)
 func renderNamedWithUnion(xmlTpl string, meta tplMeta, data map[string]any, union map[string]struct{}) string {
 	out := xmlTpl
 
@@ -479,28 +480,28 @@ func renderNamedWithUnion(xmlTpl string, meta tplMeta, data map[string]any, unio
 			val := fmt.Sprint(valAny)
 			return "{ `" + val + "` | " + modTail + " }"
 		}
-		// L2 — если поле встречается в bucket → пустая строка через модификатор
+		// L2 — if a field occurs in bucket → an empty string via the
 		if _, seen := union[name]; seen {
 			return "{ `` | " + modTail + " }"
 		}
-		// L3/L4 — оставляем как есть
+		// L3/L4 — leave it as it is
 		return tok
 	})
 
-	// 2) Чистые {name}
+	// 2) Pure {name}
 	for _, name := range meta.names {
-		// чистые — это ровно { name } без пайпа
+		// Clean is exactly { name } without a pipe
 		reExact := regexp.MustCompile(`\{[ \t]*` + regexp.QuoteMeta(name) + `[ \t]*\}`)
 		if valAny, ok := data[name]; ok {
 			val := fmt.Sprint(valAny)
 			out = reExact.ReplaceAllString(out, val)
 			continue
 		}
-		// L2 — если поле есть в union → ставим ""
+		// L2 — if the field is in union → put ""
 		if _, seen := union[name]; seen {
 			out = reExact.ReplaceAllString(out, "")
 		}
-		// иначе L3/L4 — оставить как есть
+		// otherwise L3/L4 – leave it as it is
 	}
 
 	return out
@@ -528,7 +529,7 @@ func renderPositional(xmlTpl string, arr []any) string {
 	return out
 }
 
-// replacePerc — заменяет %[N]s в строке из arr (1-базная индексация).
+// replacePerc - Replaces %[N]s in a string from arr (1-basis indexing).
 func replacePerc(s string, arr []any) string {
 	return rePerc.ReplaceAllStringFunc(s, func(tok string) string {
 		m := rePerc.FindStringSubmatch(tok)
@@ -549,14 +550,14 @@ func replacePerc(s string, arr []any) string {
 // ============================================================================
 
 type tplMeta struct {
-	names       []string // имена {name} до первого | или }
-	percentSeen int      // количество встретившихся %[N]s
+	names       []string // names {name} before first | or }
+	percentSeen int      // number of met %[N]s
 }
 
 var (
-	// Имена: {fio}, {dep.team}, {fio|...}, {dep.team | ...}
+	// Named tags: {fio}, {dep.team}, {fio|...}, {dep.team | ...}
 	reBraceName = regexp.MustCompile(`\{[ \t]*([A-Za-z0-9_.]+)[ \t]*[|}]`)
-	// Позиционные: %[N]s
+	// Positional formatting in a string pattern: %[N]s
 	rePerc = regexp.MustCompile(`%\[\s*(\d+)\s*]s`)
 )
 
@@ -579,7 +580,7 @@ func parseTplMeta(rowXML string) tplMeta {
 // ============================================================================
 
 func normalizeItem(v any) normItem {
-	// первичный кейс: {"group": {...}} или {"group": []}
+	// Primary case: {"group": {...}} или {"group": []}
 	if outer, ok := v.(map[string]any); ok && len(outer) == 1 {
 		for gk, inner := range outer {
 			switch x := inner.(type) {
@@ -603,9 +604,9 @@ func normalizeItem(v any) normItem {
 		}
 	}
 
-	// запасной вариант: плоский map (будем считать одноразовым map-item без явного groupKey)
+	// fallback: flat map (we'll treat it as a one-time map-item without an explicit groupKey)
 	if m, ok := v.(map[string]any); ok {
-		// если в значениях встречаются слайсы — не считаем map-item
+		// If there are slices in the values, do not count map-item
 		for _, vv := range m {
 			switch vv.(type) {
 			case []any, []string:
@@ -615,7 +616,7 @@ func normalizeItem(v any) normItem {
 		return normItem{raw: v, kind: "map", mapVal: m}
 	}
 
-	// слайсы без обёртки — считаем positional item
+	// slices without a wrapper — let's count the positional item
 	if a, ok := v.([]any); ok {
 		return normItem{raw: v, kind: "slice", sliceVal: a}
 	}
@@ -656,7 +657,7 @@ func extractTableRows(tbl string) []string {
 }
 
 /*
-// XML-escape хук (по умолчанию выключен — мы отдаём в <w:t> raw, а строковые моды через Go-templates)
+// XML-escape hook (disabled by default — we pass raw to <w:t>, and string mods through Go-templates)
 func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")

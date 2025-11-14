@@ -1,6 +1,6 @@
-// Package petrovich — новая реализация склонения ФИО по правилам русского языка.
-// Основано на данных из проекта “Petrovich” (https://github.com/petrovich/petrovich-rules)
-// Используется в соответствии с MIT License (см. LICENSE в этом каталоге).
+// Package petrovich — a new implementation of the declension of the full name according to the rules of the Russian language.
+// Based on data from the "Petrovich" project (https://github.com/petrovich/petrovich-rules)
+// Used under the MIT License (see LICENSE in this directory).
 package petrovich
 
 import (
@@ -13,8 +13,6 @@ import (
 
 //go:embed assets/rules.json
 var rulesPetrovich embed.FS
-
-// --- типы данных ---
 
 type (
 	Gender string
@@ -53,9 +51,7 @@ type rule struct {
 	Tags   []string `json:"tags"`
 }
 
-// --- загрузка правил ---
-
-// LoadRules загружает rules.json из embed и возвращает объект для склонения.
+// LoadRules Loads the rules.json from the embed and returns the object for declination.
 func LoadRules() (*Rules, error) {
 	file, err := rulesPetrovich.Open("assets/rules.json")
 	if err != nil {
@@ -77,7 +73,7 @@ func LoadRules() (*Rules, error) {
 	return &r, nil
 }
 
-// --- публичный API ---
+// --- public API ---
 
 func (r *Rules) InfFirstname(value string, c Case, g Gender) string {
 	return inflect(value, r.Firstname, c, g)
@@ -92,9 +88,9 @@ func (r *Rules) InfMiddlename(value string, c Case, g Gender) string {
 }
 
 // InfFio — склоняет полное ФИО.
-// fio: строка "Фамилия Имя Отчество"
-// c: падеж
-// short: true = "Иванов И.И.", false = полная форма
+// fio: string "Фамилия Имя Отчество"
+// c: maturity
+// short: true = "Иванов И.И.", false = Full Form
 func (r *Rules) InfFio(fio string, c Case, short bool) string {
 	fio = strings.TrimSpace(fio)
 	if fio == "" {
@@ -123,7 +119,7 @@ func (r *Rules) InfFio(fio string, c Case, short bool) string {
 	return strings.Join(parts, " ")
 }
 
-// --- внутренние функции ---
+// --- Internal functions ---
 
 func detectGender(middlename string) Gender {
 	l := strings.ToLower(strings.TrimSpace(middlename))
@@ -147,7 +143,7 @@ func inflect(value string, group rulesGroup, c Case, g Gender) string {
 		return value
 	}
 
-	// поддержка двойных фамилий (через дефис)
+	// support for double surnames (hyphenated)
 	parts := strings.Split(value, "-")
 	if len(parts) > 1 {
 		for i := range parts {

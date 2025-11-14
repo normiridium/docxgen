@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// transformTag получает строку вида {fio|declension:`genitive`:`ф: и }о`}
-// и конвертирует её в {.fio | declension "genitive" "ф: и }о"}
+// transformTag gets a string like {fio|declension:`genitive`:`ф: и }о`}
+// and converts it to {.fio | declension "genitive" "ф: и }о"}
 func transformTag(tag string) string {
 	tag = strings.TrimSuffix(strings.TrimPrefix(tag, "{"), "}")
 
@@ -18,12 +18,12 @@ func transformTag(tag string) string {
 		switch r {
 		case '`':
 			if inQuote {
-				// закрыли литерал
+				// closed literal
 				parts = append(parts, `"`+buf.String()+`"`)
 				buf.Reset()
 				inQuote = false
 			} else {
-				// открыли литерал
+				// opened a letter
 				inQuote = true
 				buf.Reset()
 			}
@@ -60,19 +60,19 @@ func transformTag(tag string) string {
 		out.WriteString(" | ")
 		out.WriteString(strings.TrimSpace(parts[1]))
 		for _, arg := range parts[2:] {
-			// если уже строка (мы её так пометили выше) → вставляем как есть
+			// If there is already a line (we marked it this way above) → insert it as it is.
 			if strings.HasPrefix(arg, `"`) && strings.HasSuffix(arg, `"`) {
 				out.WriteString(" ")
 				out.WriteString(arg)
 				continue
 			}
-			// если число → оставляем как есть
+			// if the number leave as it is
 			if _, err := strconv.ParseFloat(arg, 64); err == nil {
 				out.WriteString(" ")
 				out.WriteString(arg)
 				continue
 			}
-			// всё остальное → строка
+			// Everything else → line
 			out.WriteString(" ")
 			out.WriteString(`"`)
 			out.WriteString(arg)
@@ -83,9 +83,9 @@ func transformTag(tag string) string {
 	return out.String()
 }
 
-// TransformTemplate обходит весь текст документа и конвертит старые {tag|mod:arg}
-// в валидный синтаксис Go-шаблонов. Уже готовые Go-теги ({.fio ...}, {if ...} и т.п.)
-// оставляет без изменений.
+// TransformTemplate bypasses all the text of the document and converts the old {tag|mod:arg}
+// into the valid syntax of Go templates. Ready-made Go tags ({.fio ...}, {if ...}, etc.)
+// leaves unchanged.
 func TransformTemplate(input string) string {
 	var out strings.Builder
 	var token strings.Builder
@@ -104,13 +104,13 @@ func TransformTemplate(input string) string {
 			}
 		case '`':
 			if inTag {
-				// переключаем флаг кавычек
+				// toggle the quotation mark flag
 				inQuote = !inQuote
 			}
 			token.WriteRune(r)
 		case '}':
 			if inTag && !inQuote {
-				// закончили тег
+				// finished tag
 				token.WriteRune(r)
 				tok := token.String()
 				if looksLikeOldStyle(tok) {
@@ -120,7 +120,7 @@ func TransformTemplate(input string) string {
 				}
 				inTag = false
 			} else {
-				// либо обычный текст, либо внутри кавычек
+				// either plain text or inside quotation marks
 				if inTag {
 					token.WriteRune(r)
 				} else {
@@ -143,13 +143,13 @@ func TransformTemplate(input string) string {
 	return out.String()
 }
 
-// looksLikeOldStyle определяет, нужно ли прогонять тег через transformTag
+// looksLikeOldStyle determines whether to run the tag through the transformTag
 func looksLikeOldStyle(tag string) bool {
 	t := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(tag, "{"), "}"))
 	if strings.HasPrefix(t, ".") {
 		return false
 	}
-	// Уже Go-выражения — НЕ трогаем
+	// Do NOT touch Go-expressions
 	if strings.HasPrefix(t, ".") ||
 		strings.HasPrefix(t, "`") ||
 		strings.HasPrefix(t, "\"") {
@@ -160,7 +160,7 @@ func looksLikeOldStyle(tag string) bool {
 		strings.HasPrefix(t, "with ") {
 		return false
 	}
-	// старый стиль: либо простой тег без точки,
-	// либо с модификатором через |
+	// simplified style: either a simple tag without a period,
+	// or with a modifier in |
 	return !strings.HasPrefix(t, ".")
 }

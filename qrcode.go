@@ -9,7 +9,7 @@ import (
 	"github.com/skip2/go-qrcode"
 )
 
-// QrCode — финальная версия
+// QrCode — output QR code by parameters
 func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
 	const emuPerMM = 36000
 
@@ -17,7 +17,7 @@ func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
 		return ""
 	}
 
-	// -------- дефолтные значения, как в примере ----------
+	// -------- Default values ----------
 	mode := "anchor"
 	sizeMM := 32.0
 	crop := 4.0
@@ -26,7 +26,7 @@ func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
 	distT, distB, distL, distR := 0, 0, 0, 0
 	hasBorder := false
 
-	// -------- парсим параметры ----------
+	// -------- Parse the parameters ----------
 	for _, token := range opts {
 		token = strings.TrimSpace(token)
 		switch {
@@ -90,7 +90,7 @@ func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
 		}
 	}
 
-	// -------- генерируем QR --------
+	// -------- generate QR --------
 	sizePx := int(sizeMM / 25.4 * 96)
 	data, err := qrcode.Encode(value, qrcode.Medium, sizePx)
 	if err != nil {
@@ -99,7 +99,7 @@ func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
 
 	rId, base := d.AddImageRel(data)
 
-	// -------- перевод в EMU --------
+	// -------- Translation to EMU --------
 
 	cx := int(sizeMM * emuPerMM)
 	cy := cx
@@ -116,7 +116,7 @@ func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
 		borderXML = `<a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln>`
 	}
 
-	// -------- общий кусок <pic:pic> --------
+	// -------- common piece <pic:pic> --------
 	pic := fmt.Sprintf(`
 <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
   <pic:nvPicPr>
@@ -135,7 +135,7 @@ func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
   </pic:spPr>
 </pic:pic>`, base, rId, cropXML, cx, cy, borderXML)
 
-	// -------- ветка inline / anchor --------
+	// -------- branch inline / anchor --------
 	var drawing string
 
 	if mode == "inline" {
@@ -153,7 +153,7 @@ func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
     </a:graphic>
   </wp:inline>
 </w:drawing>`, cx, cy, base, pic)
-	} else { // anchor (по умолчанию)
+	} else { // anchor (default)
 		drawing = fmt.Sprintf(`
 <w:drawing xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <wp:anchor behindDoc="0" distT="%d" distB="%d" distL="%d" distR="%d" 
@@ -175,7 +175,7 @@ func (d *Docx) QrCode(value string, opts ...string) modifiers.RawXML {
 </w:drawing>`, distT, distB, distL, distR, align, valign, cx, cy, base, pic)
 	}
 
-	// -------- выходим из параграфа  --------
+	// -------- Leaving the paragraph  --------
 	xml := fmt.Sprintf("</w:t></w:r><w:r>%s</w:r><w:r><w:t>", drawing)
 
 	return modifiers.RawXML(xml)

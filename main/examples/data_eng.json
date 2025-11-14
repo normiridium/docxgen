@@ -1,0 +1,133 @@
+{
+  "lang": "eng",
+  "fio": "Ivan Ivanovich Ivanov",
+  "title": "Project Status Report and Development Prospects in the Industry",
+  "position": "Lead Engineer",
+  "department": "Information Systems Development Department",
+  "company": "TechnoSoft LLC",
+  "document_created_at": "2025-10-09T21:15:00",
+  "clients": [
+    {
+      "name": "Petr Petrovich Petrov",
+      "phone": "+7 (900) 123-45-67",
+      "position": "Senior Project Manager"
+    },
+    {
+      "name": "Anna Viktorovna Sidorova",
+      "phone": "+7 (901) 765-43-21",
+      "position": "Head of Development / CTO"
+    }
+  ],
+  "project": {
+    "code": "PRJ-2025-001",
+    "name": "ERP System Implementation",
+    "budget": 12551862,
+    "deadline": "2026-03-01"
+  },
+  "signer": {
+    "fio": "Maria Sergeevna Kuznetsova",
+    "position": "Department Director"
+  },
+  "abstract_text": "This report presents an analysis of the current state of the ERP system implementation project. It examines the achieved results, key risks, and plans for mitigating them. Particular attention is paid to integration and employee training for the new platform.",
+  "count_persons": 12,
+  "budget_report": [
+    {
+      "title_sub_block": {
+        "title_sub_block": "Preparation"
+      }
+    },
+    {
+      "budget_report_row": {
+        "n": 1,
+        "annotation": "Requirements Collection and Analysis",
+        "deadline": "2025-10-20",
+        "responsible": "Sergeev A.A.",
+        "price": 120000
+      }
+    },
+    {
+      "budget_report_row": {
+        "n": 2,
+        "annotation": "Configuring Infrastructure and Servers",
+        "deadline": "2025-10-30",
+        "responsible": "Belova G.M.",
+        "price": 240000
+      }
+    },
+    {
+      "title_sub_block": {
+        "title_sub_block": "Development"
+      }
+    },
+    {
+      "budget_report_row": {
+        "n": 3,
+        "annotation": "Development of Integration Modules",
+        "deadline": "2025-12-01",
+        "responsible": "Ivanov I.I.",
+        "price": 350000
+      }
+    },
+    {
+      "budget_report_row": {
+        "n": 4,
+        "annotation": "ERP Business Logic Development",
+        "deadline": "2026-01-15",
+        "responsible": "Kim D.S.",
+        "price": 620000
+      }
+    },
+    {
+      "title_sub_block": {
+        "title_sub_block": "Testing"
+      }
+    },
+    {
+      "budget_report_row": {
+        "n": 5,
+        "annotation": "Functional Testing",
+        "deadline": "2026-02-01",
+        "responsible": "Belov P.P.",
+        "price": 185000
+      }
+    },
+    {
+      "budget_report_row": {
+        "n": 6,
+        "annotation": "Load Testing",
+        "deadline": "2026-02-15",
+        "responsible": "Mironova K.A.",
+        "price": 210000
+      }
+    },
+    {
+      "title_sub_block": {
+        "title_sub_block": "Implementation"
+      }
+    },
+    {
+      "budget_report_row": {
+        "n": 7,
+        "annotation": "Employee Training",
+        "deadline": "2026-02-20",
+        "responsible": "Smirnova O.V.",
+        "price": 90000
+      }
+    },
+    {
+      "budget_report_row": {
+        "n": 8,
+        "annotation": "Deployment to Production",
+        "deadline": "2026-03-01",
+        "responsible": "Kirillov M.S.",
+        "price": 160000
+      }
+    },
+    {
+      "budget_report_total": {
+        "total": 1975000
+      }
+    }
+  ],
+  "document_code": "54sd5f4ds6f4sdf46sd5f46sd4fsd"
+}

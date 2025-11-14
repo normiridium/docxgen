@@ -30,12 +30,12 @@ func (g Gender) String() string {
 type Case int
 
 const (
-	Nom  Case = iota // именительный
-	Gen              // родительный
-	Dat              // дательный
-	Acc              // винительный
-	Ins              // творительный
-	Prep             // предложный
+	Nom  Case = iota // nominative
+	Gen              // genitive
+	Dat              // dative
+	Acc              // accusative
+	Ins              // instrumental
+	Prep             // prepositional
 )
 
 // NullStyle controls how 0 is rendered.
@@ -81,25 +81,25 @@ func ToWords(n int, opts ...Option) string {
 		return "минус " + ToWords(-n, opts...)
 	}
 
-	// разбиваем число на триплеты (тысячи, миллионы и т.д.)
+	// Break the number into triplets (thousands, millions, etc.)
 	groups := splitThousands(n)
 
 	var parts []string
 
-	// идём от старших к младшим (последний элемент массива — самые большие)
+	// Go from the oldest to the lowest (the last element of the array is the largest)
 	for groupIdx := len(groups) - 1; groupIdx >= 0; groupIdx-- {
 		val := groups[groupIdx]
 		if val == 0 {
 			continue
 		}
 
-		// определяем род для группы
+		// Determining the genus for the group
 		g := groupGender(groupIdx, cfg.Gender)
 
-		// собираем триплет
+		// Assembling a triplet
 		part := spellTriplet(val, g, cfg)
 
-		// добавляем мегаслово (тысяча, миллион, миллиард...)
+		// Add a megaword (тысяча, миллион, миллиард...)
 		if groupIdx > 0 && groupIdx < len(mega) {
 			mw := megaWord(groupIdx, val, cfg.Case)
 			if mw != "" {
@@ -134,7 +134,7 @@ func groupGender(group int, base Gender) Gender {
 	if group == 1 {
 		return Fem
 	} // тысяча
-	return Masc // миллион, миллиард, ... — муж. род
+	return Masc // миллион, миллиард, ... — masculine gender
 }
 
 func spellTriplet(x int, gen Gender, cfg Options) string {
@@ -173,7 +173,7 @@ func unitWord(u int, g Gender, c Case, alt8 bool) string {
 		return pick(row, c)
 	}
 
-	// спец-логика для 8 в творительном:
+	// Special logic for 8 in the creative:
 	// std (alt8=false) → «восьмью», alt (alt8=true) → «восемью»
 	if u == 8 && c == Ins {
 		if alt8 {

@@ -8,36 +8,36 @@ import (
 	"strings"
 )
 
-// Неразрывные пробелы (обычный и узкий)
+// Non-breaking spaces (normal and narrow)
 const (
-	NBSP  = "\u00A0" // обычный неразрывный пробел
-	NNBSP = "\u202F" // узкий неразрывный пробел
+	NBSP  = "\u00A0" // Normal Unbroken Space
+	NNBSP = "\u202F" // Narrow continuous space
 )
 
-// Nowrap - заменяет все обычные пробелы на неразрывные.
-// Используется для коротких кодов, индексов, номеров.
+// Nowrap - replaces all regular spaces with non-breaking spaces.
+// Used for short codes, zip codes, numbers.
 //
-// Пример:
+// Example:
 //
 //	{case_index|nowrap} → "Дело № 15"
 func Nowrap(s string) string {
 	return strings.ReplaceAll(s, " ", NBSP)
 }
 
-// Compact - заменяет все пробелы на узкие неразрывные.
-// Подходит для телефонов, номеров документов и таблиц.
+// Compact - replaces all spaces with narrow non-breaking spaces.
+// Suitable for phones, document numbers, and spreadsheets.
 //
-// Пример:
+// Example:
 //
 //	{user_phone|compact} → "+7 (4912) 572-466"
 func Compact(s string) string {
 	return strings.ReplaceAll(s, " ", NNBSP)
 }
 
-// Abbr - делает сокращения, инициалы и короткие слова неразрывными с последующим словом.
-// Это предотвращает разрыв “г.”, “ул.”, “ООО”, “И.” и т. п. на концах строк.
+// Abbr - makes abbreviations, initials, and short words inseparable from the subsequent word.
+// This prevents the breakage of "g.", "st.", "LLC", "I.", etc. at the ends of the lines.
 //
-// Примеры:
+// Examples:
 //
 //	"г. Москва" → "г. Москва"
 //	"И. И. Иванов" → "И. И. Иванов"
@@ -50,18 +50,18 @@ func Abbr(s string) string {
 	})
 }
 
-// RuPhone - форматирует российские номера телефонов по шаблонам.
-// Если номер не распознан, возвращает исходную строку.
+// RuPhone formats Russian phone numbers according to templates.
+// If the number is not recognized, returns the original string.
 //
-// Примеры:
+// Examples:
 //
 //	{user_phone|phone} → "+7 (4912) 572-466"
 //	{user_phone|phone:`тел.: +7 ($2) $3-$4-$5`:`тел.: +7 ($2) $3-$4`}
 //
-// Параметры:
-//   - без параметров — используется стандартный формат;
-//   - 1 параметр — шаблон для мобильного телефона;
-//   - 2 параметра — шаблон для мобильного и регионального телефона.
+// Options:
+//   - No parameters — the standard format is used;
+//   - 1 parameter — template for a mobile phone;
+//   - 2 parameters – template for mobile and regional phones.
 func RuPhone(s string, formats ...string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -79,11 +79,11 @@ func RuPhone(s string, formats ...string) string {
 	}
 
 	patterns := []*regexp.Regexp{
-		// --- региональные ---
+		// --- regional ---
 		regexp.MustCompile(`[+]?([78])[-\s]?\(?([1-7]\d{3})\)?[-\s]?(\d{3})[-\s]?(\d{3})`),
 		regexp.MustCompile(`[+]?([78])[-\s]?([1-7]\d{3})[-\s]?(\d{3})[-\s]?(\d{3})`),
 
-		// --- мобильные ---
+		// --- mobile ---
 		regexp.MustCompile(`[+]?([78])[-\s]?\(?(\d{3})\)?[-\s]?(\d{3})[-\s]?(\d{2})[-\s]?(\d{2})`),
 		regexp.MustCompile(`[+]?([78])[-\s]?(\d{3})[-\s]?(\d{3})[-\s]?(\d{2})[-\s]?(\d{2})`),
 	}
@@ -106,7 +106,7 @@ func RuPhone(s string, formats ...string) string {
 		for _, idx := range matches {
 			start, end := idx[0], idx[1]
 
-			// если после совпадения идёт цифра — пропускаем
+			// If there is a number after the match, skip it
 			if end < len(s) && s[end] >= '0' && s[end] <= '9' {
 				continue
 			}
@@ -130,30 +130,30 @@ func RuPhone(s string, formats ...string) string {
 
 // ------- p_split -------
 
-// MakePSplit — модификатор p_split, реализует переносы строк как в офисных редакторах,
-// но только в таблицах, где текст нужно раскидать равномерно по ячейкам.
+// MakePSplit is a p_split modifier that implements line breaks like in office editors,
+// But only in tables, where the text needs to be scattered evenly across the cells.
 //
-// В шаблоне дизайнер руками проставляет строки из подчёркиваний "_".
-// По их количеству мы узнаем сколько символов «влезет» в строку.
-// Далее заводится тег с модификатором p_split вместо этих подчеркиваний.
-// При написании модификатора p_split количество подчеркиваний указывается в параметрах.
-// Программа сама пересчитает количество подчеркиваний в pt исходя из размера текста, начертания.
+// In the template, the designer puts lines of underscores with "_" by hand.
+// By their number, we find out how many characters will "fit" into the line.
+// Next, a tag with a p_split modifier is created instead of these underscores.
+// When you write a modifier p_split the number of underlines is specified in the parameters.
+// The program itself will recalculate the number of underlines in pt based on the size of the text and style.
 //
-// Алгоритм: текст делится на слова и раскладывается по строкам,
-// чтобы слова не рвались и каждая строка укладывалась в заданное число символов.
+// Algorithm: the text is divided into words and laid out into lines,
+// so that the words do not break and each line fits into a given number of characters.
 //
-// Параметры (через двоеточие):
+// Parameters (separated by a colon):
 //
-//	{tag|p_split:<indentCount>:<lineCount>:<nLine>[:<style>:<fontSize>]}
-//	• indentCount — количество подчёркиваний в первой строке (если есть абзацный отступ);
-//	                если отступа нет, indentCount = lineCount;
-//	• lineCount   — количество подчёркиваний во всех последующих строках;
-//	• nLine       — номер строки, которую нужно взять;
-//	                если указано с плюсом (например, +2), берутся все строки начиная с этой;
-//	• style       — (необязательно) стиль шрифта: regular, bold, italic, bolditalic;
-//	• fontSize    — (необязательно) размер шрифта (10, 12, 14 и т. д.).
+// {tag|p_split:<indentCount>:<lineCount>:<nLine>[:<style>:<fontSize>]}
+//   - indentCount — the number of underscores in the first line (if there is a paragraph indent);
+//     if there is no indent indent, indentCount = lineCount;
+//   - lineCount — the number of underscores in all subsequent lines;
+//   - nLine — the number of the line to be taken;
+//     if indicated with a plus (for example, +2), all lines starting with this one are taken;
+//   - style — (optional) font style: regular, bold, italic, bolditalic;
+//   - fontSize—(optional) font size (10, 12, 14, etc.).
 //
-// Примеры:
+// Examples:
 //
 //	{address|p_split:20:65:1}        → первая строка адреса (20 подчёркиваний, затем 65)
 //	{address|p_split:20:65:2}        → вторая строка адреса
@@ -161,7 +161,7 @@ func RuPhone(s string, formats ...string) string {
 //	{fio|p_split:15:60:1:`bold`:12}    → первая строка, жирный 12 pt
 func MakePSplit(fonts *metrics.FontSet) func(text string, firstUnders, otherUnders, nLine any, extra ...any) string {
 	return func(text string, firstUnders, otherUnders, nLine any, extra ...any) string {
-		// парсинг чисел
+		// Number parsing
 		parseInt := func(a any) (int, bool) {
 			switch v := a.(type) {
 			case int:
@@ -186,7 +186,7 @@ func MakePSplit(fonts *metrics.FontSet) func(text string, firstUnders, otherUnde
 			return ""
 		}
 
-		// nLine: может быть "+N" (join от N до конца)
+		// nLine: can be "+N" (join from N to end)
 		isMore := false
 		nIdx := 1
 		switch v := nLine.(type) {
@@ -212,7 +212,7 @@ func MakePSplit(fonts *metrics.FontSet) func(text string, firstUnders, otherUnde
 			nIdx = n
 		}
 
-		// дефолты
+		// defaults
 		style := metrics.Regular
 		sizePt := 12.0
 
@@ -233,7 +233,7 @@ func MakePSplit(fonts *metrics.FontSet) func(text string, firstUnders, otherUnde
 			style = parseStyle(extra[1])
 		}
 
-		// разбиваем
+		// split
 		lines, err := tostring.SplitParagraphByUnderscore(
 			strings.TrimSpace(text),
 			fonts,

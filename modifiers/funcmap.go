@@ -12,31 +12,31 @@ import (
 	"text/template"
 )
 
-// RawXML — тип для "сырых" XML-вставок, которые не нужно экранировать.
+// RawXML is a type for raw XML inserts that do not need to be escaped.
 type RawXML string
 
-// Options задаёт параметры построения FuncMap.
+// Options sets the parameters for building the FuncMap.
 type Options struct {
-	// Fonts — набор шрифтов для p_split. Если nil, p_split не подключаем.
+	// Fonts is a set of fonts for p_split. If nil, don't connect p_split.
 	Fonts *metrics.FontSet
-	// Data — входные данные шаблона (нужны для concat, чтобы уметь подцеплять другие теги по имени).
+	// Data — template input data (needed for concat to be able to pick up other tags by name).
 	Data map[string]any
-	// ExtraFuncs — пользовательские модификаторы с количеством фиксированных параметров.
-	// Поведение полностью аналогично builtins.
+	// ExtraFuncs are custom modifiers with a number of fixed parameters.
+	// The behavior is completely similar to builtins.
 	ExtraFuncs map[string]ModifierMeta
 }
 
-// Чтобы Word корректно отображал табуляцию, нужно закрывать предыдущий текстовый элемент.
-// Поэтому при нескольких подряд табах появляются пустые <w:t></w:t>, но в Word они
-// всё равно отображаются правильно и выглядят лучше, чем любые другие варианты.
+// For Word to display the tab correctly, you need to close the previous text element.
+// Therefore, with several tabs in a row, empty <w:t></w:t> appear, but in Word they are
+// still display correctly and look better than any other options.
 const (
 	TAB     = "</w:t><w:tab/><w:t>"
 	NEWLINE = "<w:br/>"
 )
 
-// wordReplacer — выполняет постобработку результата xml.Encoder:
-// - убирает обёртку <string>...</string>, которую xml.Encoder добавляет для строк;
-// - заменяет управляющие символы на совместимые с Word теги (<w:br/>, <w:tab/>).
+// wordReplacer - Performs post-processing of the result xml.Encoder:
+// - removes the <string>...</string> wrapper that xml.Encoder adds to strings;
+// - Replaces control characters with Word-compatible tags (<w:br/>, <w:tab/>).
 var wordReplacer = strings.NewReplacer(
 	"<string>", "",
 	"</string>", "",
@@ -46,7 +46,7 @@ var wordReplacer = strings.NewReplacer(
 	"&#x9;", TAB, // табуляция \t
 )
 
-// escapeForWord — готовит строку для вставки в document.xml.
+// escapeForWord - Prepares a string to be inserted into the document.xml.
 func escapeForWord(s string) (string, error) {
 	var b bytes.Buffer
 	w := bufio.NewWriter(&b)
@@ -58,102 +58,103 @@ func escapeForWord(s string) (string, error) {
 	return wordReplacer.Replace(b.String()), nil
 }
 
-// ---- Реестр модификаторов ----
+// ---- Register of modifiers ----
 
 type ModifierMeta struct {
-	Fn    any // целевая функция (с "красивой" сигнатурой)
-	Count int // сколько ПЕРВЫХ аргументов считать фиксированными; pipeline-value всегда последний
+	Func  any // target function (with a "beautiful" signature)
+	Count int // how many FIRST arguments are considered fixed; pipeline-value is always the last
 }
 
-// Встроенные модификаторы.
-// Count — это число "фиксированных" параметров модификатора (идут перед pipeline-value в шаблоне).
-// WrapModifier сам разложит и вызовет функцию в сигнатуре вида: fn(value, fixed..., formats...)
+// Built-in modifiers.
+// Count is the number of "fixed" modifier parameters (preceded by pipeline-value in the template).
+// WrapModifier itself will decompose and call a function in the signature of the form: fn(value, fixed..., formats...)
 var builtins = map[string]ModifierMeta{
 	// string mods
-	"prefix":       {Fn: Prefix, Count: 1},
-	"uniq_prefix":  {Fn: UniqPrefix, Count: 1},
-	"postfix":      {Fn: Postfix, Count: 1},
-	"uniq_postfix": {Fn: UniqPostfix, Count: 1},
-	"default":      {Fn: DefaultValue, Count: 1},
-	"filled":       {Fn: Filled, Count: 1},
-	"replace":      {Fn: Replace, Count: 2},
-	"truncate":     {Fn: Truncate, Count: 2},
-	"word_reverse": {Fn: WordReverse, Count: 0},
-	"br":           {Fn: NewLine, Count: 0},
-	"nl":           {Fn: NewLine, Count: 0},
+	"prefix":       {Func: Prefix, Count: 1},
+	"uniq_prefix":  {Func: UniqPrefix, Count: 1},
+	"postfix":      {Func: Postfix, Count: 1},
+	"uniq_postfix": {Func: UniqPostfix, Count: 1},
+	"default":      {Func: DefaultValue, Count: 1},
+	"filled":       {Func: Filled, Count: 1},
+	"replace":      {Func: Replace, Count: 2},
+	"truncate":     {Func: Truncate, Count: 2},
+	"word_reverse": {Func: WordReverse, Count: 0},
+	"br":           {Func: NewLine, Count: 0},
+	"nl":           {Func: NewLine, Count: 0},
 
 	// text mods
-	"nowrap":   {Fn: Nowrap, Count: 0},
-	"compact":  {Fn: Compact, Count: 0},
-	"abbr":     {Fn: Abbr, Count: 0},
-	"ru_phone": {Fn: RuPhone, Count: 0},
+	"nowrap":   {Func: Nowrap, Count: 0},
+	"compact":  {Func: Compact, Count: 0},
+	"abbr":     {Func: Abbr, Count: 0},
+	"ru_phone": {Func: RuPhone, Count: 0},
 
 	// numeric mods
-	"numeral":   {Fn: Numeral, Count: 0},
-	"plural":    {Fn: Plural, Count: 0},
-	"sign":      {Fn: Sign, Count: 0},
-	"pad_left":  {Fn: PadLeft, Count: 2},
-	"pad_right": {Fn: PadRight, Count: 2},
-	"money":     {Fn: Money, Count: 1},
-	"roman":     {Fn: Roman, Count: 0},
+	"numeral":   {Func: Numeral, Count: 0},
+	"plural":    {Func: Plural, Count: 0},
+	"sign":      {Func: Sign, Count: 0},
+	"pad_left":  {Func: PadLeft, Count: 2},
+	"pad_right": {Func: PadRight, Count: 2},
+	"money":     {Func: Money, Count: 1},
+	"roman":     {Func: Roman, Count: 0},
 
 	// declension mods
-	"decl":       {Fn: Declension, Count: 1},
-	"declension": {Fn: Declension, Count: 1},
+	"decl":       {Func: Declension, Count: 1},
+	"declension": {Func: Declension, Count: 1},
 
 	// date mods
-	"date_format": {Fn: DateFormat, Count: 1},
+	"date_format": {Func: DateFormat, Count: 1},
 
 	// qrcode mod
-	"qrcode":  {Fn: QrCode, Count: 0},
-	"barcode": {Fn: BarCode, Count: 0},
+	"qrcode":  {Func: QrCode, Count: 0},
+	"barcode": {Func: BarCode, Count: 0},
 }
 
-// NewFuncMap возвращает карту функций для Go-шаблонов.
-// Подключает стандартные модификаторы и сливает ExtraFuncs поверх.
+// NewFuncMap returns a function map for Go templates.
+// Plugs in the standard modifiers and drains the ExtraFuncs on top.
 func NewFuncMap(opts Options) template.FuncMap {
 	fm := template.FuncMap{}
 
-	// Регистрируем builtins с учётом количества фиксированных параметров
+	// Registering builtins taking into account the number of fixed parameters
 	for name, meta := range builtins {
-		fm[name] = WrapModifier(meta.Fn, meta.Count)
+		fm[name] = WrapModifier(meta.Func, meta.Count)
 	}
 
-	// concat — особый: нужен доступ к opts.Data; сигнатура: func(base string, parts ...string) string
-	// В шаблоне: {base|concat:`x`:`y`:`, `}
-	// Здесь Count=0: все параметры считаем "formats", они идут после value.
+	// concat is special: you need access to opts. Data; signature: func(base string, parts ... string) string
+	//	In the template: {base|concat:'x':'y':', '}
+	//	Here Count=0: all parameters are considered "formats", they come after value.
 	fm["concat"] = WrapModifier(ConcatFactory(opts.Data), 0)
 
-	// p_split подключаем, если есть шрифты.
-	// Сигнатура замыкания: func(text string, firstUnders, otherUnders, nLine any, extra ...any) string
-	// В шаблоне: {text|p_split:20:65:2} или {text|p_split:20:65:+2:`bold`:12}
-	// Здесь Count=3 (firstUnders, otherUnders, nLine) — extra уйдут как variadic после них.
+	// p_split include if there are fonts.
+	//	Closure signature: func(text string, firstUnders, otherUnders, nLine any, extra ... any) string
+	//	In the template: {text|p_split:20:65:2} or {text|p_split:20:65:+2:'bold':12}
+	//	Here, Count=3 (firstUnders, otherUnders, nLine) — extra will go as variadic after them.
 	if opts.Fonts != nil {
 		fm["p_split"] = WrapModifier(MakePSplit(opts.Fonts), 3)
 	}
 
-	// Мержим пользовательские модификаторы (полноценные участники DSL)
+	// Merge custom modifiers (full DSL participants)
 	if opts.ExtraFuncs != nil {
 		for k, meta := range opts.ExtraFuncs {
-			fm[k] = WrapModifier(meta.Fn, meta.Count)
+			fm[k] = WrapModifier(meta.Func, meta.Count)
 		}
 	}
 
 	return fm
 }
 
-// ----------------- ВСПОМОГАТЕЛЬНОЕ -----------------
-
-// splitArgs — раскладывает args из шаблона по договорённостям DSL.
+// -----------------AUXILIARY-----------------
+//
+// splitArgs — decomposes args from a template according to DSL conventions.
 // args = [fixed1, fixed2, ..., fixedN, formats..., value]
 // Count = N.
-// Возвращает:
+// Returns:
 //
-//	values  — ровно Count первых параметров (если их меньше, включаем режим B: мягкий возврат value без изменений);
-//	formats — все промежуточные;
-//	value   — последний (pipeline) аргумент.
+// values — exactly the Count of the first parameters (if there are fewer of them, turn on mode B: soft return of value without changes);
 //
-// Стратегия B (для библиотеки): при нехватке аргументов возвращаем исходное value без изменений.
+//	formats — all intermediate ones;
+//	value is the last (pipeline) argument.
+//
+// Strategy B (for the library): if there are not enough arguments, return the original value unchanged.
 func splitArgs(countFirst int, args []any) (values []any, formats []any, value any) {
 	n := len(args)
 	if n == 0 {
@@ -162,22 +163,22 @@ func splitArgs(countFirst int, args []any) (values []any, formats []any, value a
 
 	value = args[n-1]
 
-	// нормализуем countFirst: минимум 0
+	// normalize countFirst: minimum 0
 	if countFirst < 0 {
 		countFirst = 0
 	}
 
-	// если не хватает параметров для фиксированных — мягко выходим (B)
+	// if there are not enough parameters for fixed ones, gently exit (B)
 	if n-1 < countFirst {
 		return nil, nil, value
 	}
 
-	// фиксированные
+	// fixed
 	if countFirst > 0 {
 		values = args[:countFirst]
 	}
 
-	// formats — всё между фиксированными и value
+	// formats — everything between fixed and value
 	startFormats := countFirst
 	endFormats := n - 1
 	if startFormats < endFormats {
@@ -187,13 +188,13 @@ func splitArgs(countFirst int, args []any) (values []any, formats []any, value a
 	return
 }
 
-// WrapModifier — единая обёртка вызова модификатора.
-// Делает разбор аргументов по правилу DSL: первые "fixed" — фиксированные, последний — pipeline-value,
-// всё между ними — "formats". Затем вызывает целевую функцию в виде:
+// WrapModifier is a single wrapper for a modifier call.
+// Parses arguments according to the DSL rule: the first "fixed" is fixed, the last is pipeline-value,
+// everything in between is "formats". Then calls the target function in the form:
 //
-//	fn(value, fixed..., formats...)
+// fn(value, fixed..., formats...)
 //
-// Поддерживает вариадики.
+// Supports variadics.
 func WrapModifier(fn any, fixed int) any {
 	return func(args ...any) any {
 		values, formats, value := splitArgs(fixed, args)
@@ -205,43 +206,43 @@ func WrapModifier(fn any, fixed int) any {
 			return value
 		}
 
-		// Сколько параметров у функции?
+		// How many parameters does a function have?
 		numIn := fnType.NumIn()
 		isVariadic := fnType.IsVariadic()
 
-		// Сколько non-variadic параметров ожидается?
+		// How many non-variadic parameters are expected?
 		nonVarCount := numIn
 		if isVariadic {
 			nonVarCount = numIn - 1
 		}
 
-		// Собираем список финальных аргументов DSL-уровня: value, fixed..., formats...
+		// Assembling a list of final DSL-level arguments: value, fixed..., formats...
 		final := make([]any, 0, 1+len(values)+len(formats))
 		final = append(final, value)
 		final = append(final, values...)
 		final = append(final, formats...)
 
-		// Если конечных аргументов меньше, чем non-variadic ожидает функция — мягко возвращаем value (B).
+		// If there are fewer finite arguments than the non-variadic function expects, softly return value (B).
 		if len(final) < nonVarCount {
 			return value
 		}
 
 		callArgs := make([]reflect.Value, 0, numIn)
 
-		// Приведение типов для non-variadic параметров
+		// Type casting for non-variadic parameters
 		for i := 0; i < nonVarCount; i++ {
 			paramT := fnType.In(i)
 			argV := toReflectValue(final[i], paramT)
 			callArgs = append(callArgs, argV)
 		}
 
-		// Variadic-часть (если требуется)
+		// Variadic part (if required)
 		if isVariadic {
-			// ожидаемый тип последнего параметра — слайс
+			// The expected type of the last parameter is slice
 			variadicSliceT := fnType.In(numIn - 1)
 			elemT := variadicSliceT.Elem()
 
-			// соберём formats (остаток final) в слайс нужного типа
+			// Assemble the formats (final remainder) into a slice of the desired type
 			variadicCount := len(final) - nonVarCount
 			sliceV := reflect.MakeSlice(variadicSliceT, variadicCount, variadicCount)
 			for i := 0; i < variadicCount; i++ {
@@ -250,23 +251,23 @@ func WrapModifier(fn any, fixed int) any {
 			}
 			callArgs = append(callArgs, sliceV)
 
-			// Вызов CallSlice для вариадиков
+			// Calling CallSlice for Variadics
 			out := fnVal.CallSlice(callArgs)
 			return normalizeReturn(out)
 		}
 
-		// Если не вариадик — лишние аргументы игнорируем
+		// If you don't have a variadic, ignore unnecessary arguments
 		out := fnVal.Call(callArgs)
 		return normalizeReturn(out)
 	}
 }
 
-// normalizeReturn — нормализует возвращаемые значения модификатора:
-// - один string → экранируем под Word
-// - один любой → как есть
-// - несколько → []any
+// normalizeReturn - Normalizes the return values of the modifier:
+// - one string → escaped under Word
+// - Any one → as is
+// - multiple → []any
 func normalizeReturn(out []reflect.Value) any {
-	// если модификатор вернул RawXML — вставляем как есть
+	// if the modifier returned RawXML, paste it as it is
 	if len(out) == 1 && out[0].IsValid() {
 		if raw, ok := out[0].Interface().(RawXML); ok {
 			return string(raw)
@@ -288,8 +289,8 @@ func normalizeReturn(out []reflect.Value) any {
 	return res
 }
 
-// toReflectValue — аккуратно приводит значение к нужному типу параметра функции.
-// Стратегия: Assignable → Convertible → особые случаи (string, int) → zero value.
+// toReflectValue - Gently casts the value to the desired function parameter type.
+// Strategy: Assignable → Convertible → special cases (string, int) → zero value.
 func toReflectValue(v any, target reflect.Type) reflect.Value {
 	// nil → zero
 	if v == nil {
@@ -299,28 +300,28 @@ func toReflectValue(v any, target reflect.Type) reflect.Value {
 	rv := reflect.ValueOf(v)
 	rt := rv.Type()
 
-	// Если уже assignable — готово
+	// If already assignable, you're done
 	if rt.AssignableTo(target) {
 		return rv
 	}
 
-	// Если convertible — конвертируем
+	// If convertible, convert
 	if rt.ConvertibleTo(target) {
 		return rv.Convert(target)
 	}
 
-	// Частые удобные приведения:
+	// Frequent convenient ghosts:
 	switch target.Kind() {
 	case reflect.Interface:
-		// Любое значение подходит под interface{}
+		// Any value fits interface{}
 		return rv
 
 	case reflect.String:
-		// Всё можно превратить в строку
+		// Everything can be turned into a string
 		return reflect.ValueOf(fmt.Sprint(v))
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		// Частный случай: пришла строка — попробуем atoi
+		// A special case: a line came — let's try atoi
 		if s, ok := v.(string); ok {
 			if n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil {
 				x := reflect.New(target).Elem()
@@ -328,7 +329,7 @@ func toReflectValue(v any, target reflect.Type) reflect.Value {
 				return x
 			}
 		}
-		// Если число, но другого знакового типа — попробуем конвертировать через fmt → atoi
+		// If it's a number, but of a different sign type, let's try to convert it via fmt → atoi
 		if isNumeric(rt) {
 			s := fmt.Sprint(v)
 			if n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil {
@@ -355,11 +356,11 @@ func toReflectValue(v any, target reflect.Type) reflect.Value {
 			}
 		}
 	default:
-		// Неподдержанный тип — просто возвращаем zero value
+		// Unsupported type – just return zero value
 		return reflect.Zero(target)
 	}
 
-	// Не смогли — отдаём zero value нужного типа (стратегия B — не паниковать)
+	// If you can't, give zero value of the desired type (strategy B – don't panic)
 	return reflect.Zero(target)
 }
 

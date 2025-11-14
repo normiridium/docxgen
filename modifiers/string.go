@@ -6,18 +6,18 @@ import (
 )
 
 var (
-	// NewLineInText - Перенос строки внутри параграфа
+	// NewLineInText - Line wrap within a paragraph
 	NewLineInText = "</w:t><w:br/><w:t>"
 )
 
-// NewLine — добавить перенос к строке.
+// NewLine — Add a hyphen to a line.
 func NewLine(s string) RawXML {
 	return RawXML(s + NewLineInText)
 }
 
-// Prefix — добавить префикс к строке, если она не пустая.
+// Prefix - Add a prefix to the string if it is not empty.
 //
-// Пример:
+// Example:
 //
 //	{fio|prefix:`гражданин `} → "гражданин Иванов Иван Иванович"
 func Prefix(s, p string) string {
@@ -27,9 +27,9 @@ func Prefix(s, p string) string {
 	return p + s
 }
 
-// UniqPrefix — добавить префикс только если строка непустая и ещё не начинается с него.
+// UniqPrefix - add a prefix only if the string is not empty and does not start with it yet.
 //
-// Пример:
+// Example:
 //
 //	{org|uniqprefix:`ООО `} → "ООО Ромашка"
 func UniqPrefix(s, p string) string {
@@ -42,9 +42,9 @@ func UniqPrefix(s, p string) string {
 	return p + s
 }
 
-// Postfix — добавить постфикс к строке, если она не пустая.
+// Postfix — add a postfix to the string if it is not empty.
 //
-// Пример:
+// Example:
 //
 //	{sum|postfix:` руб.`} → "100 руб."
 func Postfix(s, p string) string {
@@ -54,9 +54,9 @@ func Postfix(s, p string) string {
 	return s + p
 }
 
-// UniqPostfix — добавить постфикс только если строка непустая и ещё не оканчивается на него.
+// UniqPostfix — add a postfix only if the line is not empty and does not end with it yet.
 //
-// Пример:
+// Example:
 //
 //	{city|uniqpostfix:` г.`} → "Москва г."
 func UniqPostfix(s, p string) string {
@@ -69,9 +69,9 @@ func UniqPostfix(s, p string) string {
 	return s + p
 }
 
-// DefaultValue — вернуть значение по умолчанию, если строка пустая.
+// DefaultValue - Return the default value if the string is empty.
 //
-// Пример:
+// Example:
 //
 //	{position|default:`сотрудник`} → "сотрудник"
 func DefaultValue(s, def string) string {
@@ -81,39 +81,39 @@ func DefaultValue(s, def string) string {
 	return s
 }
 
-// Filled — вернуть указанное значение, если строка непустая; иначе пусто.
+// Filled — return the specified value if the string is not empty; otherwise it is empty.
 //
-// Пример:
+// Example:
 //
 //	{passport|filled:`—`} → "—"
 func Filled(val any, out string) string {
-	// nil → пусто
+	// nil → empty
 	if val == nil {
 		return ""
 	}
-	// для строки проверим пустую
+	// For the line, check the empty
 	if s, ok := val.(string); ok {
 		if s == "" {
 			return ""
 		}
 		return out
 	}
-	// для всего остального — просто считаем, что "есть"
+	// for everything else, we just believe that "is"
 	return out
 }
 
-// Replace — заменить все вхождения подстроки.
+// Replace - Replace all occurrences of the substring.
 //
-// Пример:
+// Example:
 //
 //	{address|replace:`Москва`:`Санкт-Петербург`}
 func Replace(s, old, new string) string {
 	return strings.ReplaceAll(s, old, new)
 }
 
-// Truncate — обрезать строку до n символов, при необходимости добавить хвост (например, "…").
+// Truncate - Trim the string to n characters, add a tail if necessary (e.g. "...").
 //
-// Пример:
+// Example:
 //
 //	{title|truncate:`20`:`…`} → "Очень длинное заг…"
 func Truncate(s string, n int, suffix string) string {
@@ -127,9 +127,9 @@ func Truncate(s string, n int, suffix string) string {
 	return string(runes[:n]) + suffix
 }
 
-// WordReverse — меняет порядок слов в строке на обратный.
+// WordReverse - Changes the order of words in a string to reverse.
 //
-// Примеры:
+// Examples:
 //
 //	{fio|word_reverse}
 //	  "Фамилия Имя Отчество" → "Отчество Имя Фамилия"
@@ -144,10 +144,10 @@ func WordReverse(s string) string {
 	return strings.Join(parts, " ")
 }
 
-// ConcatFactory возвращает функцию concat, которая склеивает строку с тегами или текстом.
-// Последний параметр всегда считается разделителем.
+// ConcatFactory returns a concat function that glues a string with tags or text.
+// The last parameter is always considered a separator.
 //
-// Примеры:
+// Examples:
 //
 //	{own_org_name|concat:`own_org_address`:`position`:`department`:`, `}
 //	→ "ООО Рога, Москва, Отдел продаж"
@@ -173,7 +173,7 @@ func ConcatFactory(data map[string]any) func(base string, parts ...string) strin
 		for _, p := range parts[:len(parts)-1] {
 			val := strings.TrimSpace(p)
 
-			if v, ok := data[val]; ok { // если совпадает с тегом
+			if v, ok := data[val]; ok { // if it matches tag
 				if str, ok := v.(string); ok {
 					val = str
 				} else {

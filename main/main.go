@@ -31,7 +31,7 @@ var (
 	sseClients = map[chan struct{}]struct{}{}
 )
 
-// Шлём сигнал всем подписчикам /events
+// Send a signal to all subscribers /events
 func sseNotifyReload() {
 	sseMu.Lock()
 	defer sseMu.Unlock()
@@ -92,7 +92,7 @@ func sseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// путь к файлу, который смотрим в превью
+// the path to the file that we are looking at in the preview
 func previewOutputPath(out string, pdfOut bool) string {
 	if pdfOut {
 		low := strings.ToLower(out)
@@ -159,17 +159,18 @@ func runPreviewServer(port int, out string, pdfOut bool) {
 // ---------- main ----------
 
 func main() {
-	in := flag.String("in", "", "входной DOCX-шаблон")
-	out := flag.String("out", "", "результат (по умолчанию имя шаблона + _out.docx)")
-	dataFile := flag.String("data", "", "JSON с данными для подстановки")
-	watch := flag.Bool("watch", false, "следить за изменениями и пересборкой автоматически")
-	debounce := flag.Duration("debounce", 300*time.Millisecond, "дебаунс перед пересборкой")
-	serve := flag.Bool("serve", false, "режим демона (HTTP API)")
-	port := flag.Int("port", 8080, "порт HTTP демона / превью")
-	download := flag.Bool("download", false, "не сохранять, а вывести готовый DOCX в stdout")
-	pdfOut := flag.Bool("pdf", false, "сразу конвертировать в PDF (без сохранения DOCX)")
-	preview := flag.Bool("preview", false, "запустить HTML-просмотрщик /view для результата (удобно с --watch и --pdf)")
-	pdfEngine := flag.String("pdf-engine", "", "preferred PDF engine: doc2pdf|libreoffice|soffice|unoconv|pandoc")
+	in := flag.String("in", "", "input DOCX template")
+	out := flag.String("out", "", "result (default template name + _out.docx)")
+	dataFile := flag.String("data", "", "JSON with lookup data")
+	watch := flag.Bool("watch", false, "monitor changes and rebuilds automatically")
+	debounce := flag.Duration("debounce", 300*time.Millisecond, "debounce before rebuild")
+	serve := flag.Bool("serve", false, "daemon mode (HTTP API)")
+	port := flag.Int("port", 8080, "daemon HTTP port/preview")
+	download := flag.Bool("download", false, "do not save, but output the finished DOCX to stdout")
+	pdfOut := flag.Bool("pdf", false, "immediately convert to PDF (without saving DOCX)")
+	preview := flag.Bool("preview", false, "run the HTML /view viewer for the result (handy with --watch and --pdf)")
+	pdfEngine := flag.String("pdf-engine", "", "preferred PDF engine: libreoffice|soffice|unoconv")
+	lang := flag.String("lang", "eng", "localization")
 	flag.Parse()
 
 	baseDir, _ := os.Getwd()
@@ -193,19 +194,19 @@ func main() {
 		return
 	}
 
-	// дефолты
+	// defaults
 	if *in == "" {
-		*in = filepath.Join(projectRoot, "main/examples/template.docx")
+		*in = filepath.Join(projectRoot, fmt.Sprintf("main/examples/template_%s.docx", *lang))
 	}
 	if *dataFile == "" {
-		*dataFile = filepath.Join(projectRoot, "main/examples/data.json")
+		*dataFile = filepath.Join(projectRoot, fmt.Sprintf("main/examples/data_%s.json", *lang))
 	}
 	if *out == "" {
 		base := strings.TrimSuffix(filepath.Join(projectRoot, "main/examples", filepath.Base(*in)), ".docx")
 		*out = base + "_out.docx"
 	}
 
-	// первая сборка
+	// First assembly
 	if err := render(*in, *dataFile, *out, projectRoot, *download, *pdfOut); err != nil {
 		log.Fatalf("💥  ошибка сборки: %v\n", err)
 	}
@@ -214,7 +215,7 @@ func main() {
 	}
 	fmt.Println("💚  готово: " + prettyOutputPath(*out, *pdfOut, baseDir))
 
-	// если превью, запускаем сервер
+	// If it's a preview, start the server
 	if *preview {
 		if *watch {
 			go runPreviewServer(*port, *out, *pdfOut)
@@ -311,7 +312,7 @@ func main() {
 	}
 }
 
-// ---------- общий пайплайн ----------
+// ---------- Shared Pipeline ----------
 func buildDocFromPath(path, projectRoot string) (*docxgen.Docx, error) {
 	doc, err := docxgen.Open(path)
 	if err != nil {
@@ -326,7 +327,7 @@ func buildDocFromPath(path, projectRoot string) (*docxgen.Docx, error) {
 }
 
 func executeTemplate(doc *docxgen.Docx, data map[string]any) error {
-	// в ExecuteTemplate внутри добавляются builtins; наши моды уже в extraFuncs
+	// builtins are added inside the ExecuteTemplate; our mods are already in extraFuncs
 	if err := doc.ExecuteTemplate(data); err != nil {
 		return fmt.Errorf("шаблон: %w", err)
 	}
@@ -344,11 +345,11 @@ func loadFonts(doc *docxgen.Docx, projectRoot string) error {
 
 func registerCommonModifiers(doc *docxgen.Docx) {
 	doc.ImportModifiers(map[string]modifiers.ModifierMeta{
-		"upper": {Fn: func(value string) string { return strings.ToUpper(value) }, Count: 0},
-		"lower": {Fn: func(value string) string { return strings.ToLower(value) }, Count: 0},
-		"wrap":  {Fn: func(v, l, r string) string { return l + v + r }, Count: 2},
+		"upper": {Func: func(value string) string { return strings.ToUpper(value) }, Count: 0},
+		"lower": {Func: func(value string) string { return strings.ToLower(value) }, Count: 0},
+		"wrap":  {Func: func(v, l, r string) string { return l + v + r }, Count: 2},
 		"gender_select": {
-			Fn: func(v any, forms ...string) string {
+			Func: func(v any, forms ...string) string {
 				male, female, neutral := "Уважаемый", "Уважаемая", "Уважаемый(ая)"
 				if len(forms) >= 1 && strings.TrimSpace(forms[0]) != "" {
 					male = forms[0]
@@ -398,7 +399,7 @@ func registerCommonModifiers(doc *docxgen.Docx) {
 	})
 }
 
-// ---------- CLI рендер ----------
+// ---------- CLI render ----------
 func render(in, dataFile, out, projectRoot string, download, pdfOut bool) error {
 	data := map[string]any{}
 	raw, err := os.ReadFile(dataFile)
@@ -452,7 +453,7 @@ func render(in, dataFile, out, projectRoot string, download, pdfOut bool) error 
 	return nil
 }
 
-// ---------- демон ----------
+// ---------- demon ----------
 func runServer(port int, projectRoot string) {
 	http.HandleFunc("/generate", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -495,7 +496,7 @@ func runServer(port int, projectRoot string) {
 				}
 			}
 		case strings.HasPrefix(strings.TrimSpace(req.Template), "<w:"):
-			// нужен «скелет» docx; используем любой валидный в проекте
+			// you need a docx "skeleton"; use any valid in the project
 			doc, err = docxgen.Open("examples/template.docx")
 			if err != nil {
 				jsonErr(w, 500, "template skeleton error: %v", err)
@@ -527,7 +528,7 @@ func runServer(port int, projectRoot string) {
 			}
 		}
 
-		// общие шрифты/модификаторы и выполнение
+		// Common fonts/modifiers and execution
 		if err := loadFonts(doc, "."); err != nil {
 			log.Printf("шрифты: %v\n", err)
 		}
@@ -544,7 +545,7 @@ func runServer(port int, projectRoot string) {
 			return
 		}
 
-		// отдаём файл напрямую
+		// Send the file directly
 		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 		w.Header().Set("Content-Disposition", `attachment; filename="result.docx"`)
 		if err := doc.SaveToWriter(w); err != nil {
@@ -559,9 +560,8 @@ func runServer(port int, projectRoot string) {
 
 var pdfEngineFlag string
 
-// порядок движков: от лучшего к худшему
+// Engine Order: From Best to Worst
 var pdfEngines = []string{
-	"doc2pdf", // OnlyOffice: быстрый, идеальный
 	"soffice", // LibreOffice headless
 	"libreoffice",
 	"lowriter",
@@ -576,9 +576,6 @@ func findExec(bin string) (string, bool) {
 func runEngine(engine string, docx, pdf string) error {
 	fmt.Printf("📑  пробуем конвертацию в pdf через: %s\n", engine)
 	switch engine {
-
-	case "doc2pdf":
-		return exec.Command("doc2pdf", docx, pdf).Run()
 
 	case "soffice", "libreoffice":
 		return exec.Command(engine,
@@ -670,7 +667,7 @@ func convertToPDF(docxBytes []byte) ([]byte, error) {
 	return nil, fmt.Errorf("no available PDF engines found")
 }
 
-// ---------- вспомогательные ----------
+// ---------- helpers ----------
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
@@ -709,13 +706,13 @@ func hasAnySuffix(s string, exts ...string) bool {
 }
 
 func prettyOutputPath(out string, pdfOut bool, baseDir string) string {
-	// выбираем реальное имя файла
+	// Choosing the real file name
 	result := out
 	if pdfOut {
 		result = strings.TrimSuffix(out, filepath.Ext(out)) + ".pdf"
 	}
 
-	// убираем абсолютный путь для приватности
+	// Removing the absolute path for privacy
 	pretty := strings.TrimPrefix(result, baseDir)
 	if strings.HasPrefix(pretty, "/") {
 		pretty = pretty[1:]

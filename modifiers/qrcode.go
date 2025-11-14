@@ -2,45 +2,45 @@ package modifiers
 
 var QrCodeFunc func(string, ...string) RawXML
 
-// QrCode — вставляет QR-код по заданному значению прямо в документ.
+// QrCode — inserts a QR code at a specified value directly into the document.
 //
-// Пример использования:
+// Example of use:
 //
-//	{project.code|qrcode:`right`:`top`:`8%`:`5/5`:`border`}
+// {project.code|qrcode:`right`:`top`:`8%`:`5/5`:`border`}
 //
-// Формат:
+// Format:
 //
-//	{значение|qrcode:[mode]:[align]:[valign]:[crop%]:[margins]:[border]}
+// {value|qrcode:[mode]:[align]:[valign]:[crop%]:[margins]:[border]}
 //
-// Параметры (все необязательные, порядок не важен):
+// Parameters (all optional, the order is not important):
 //
-//   - mode — "anchor" (по умолчанию) или "inline"
-//     Режим вставки: плавающий (anchor) или встроенный в текст (inline).
+//   - mode — "anchor" (default) or "inline"
+//     Insertion mode: floating (anchor) or embedded in text (inline).
 //
 //   - align — "left", "center", "right"
-//     Горизонтальное выравнивание для режима anchor (по умолчанию "right").
+//     Horizontal alignment for anchor mode (default is "right").
 //
 //   - valign — "top", "middle", "bottom"
-//     Вертикальное выравнивание (по умолчанию "top").
-//     "middle" — синоним "center".
+//     Vertical alignment (default "top").
+//     "middle" is a synonym for "center".
 //
-//   - <N>mm — размер QR-кода в миллиметрах (по умолчанию 32 мм).
+// - <N>mm—QR code size in millimeters (32 mm by default).
 //
-//   - <N>% — кроп (обрезка белых полей вокруг QR-кода), по умолчанию 4 %.
+// - <N>% – crop (crop the white margins around the QR code), 4% by default.
 //
-//   - margins — отступы от текста, в миллиметрах.
-//     Форматы:
-//     "5/5"         — верх/низ = 5 мм, лево/право = 5 мм;
-//     "5/3/5/3"     — top/right/bottom/left отдельно;
-//     "5/3/7"       — top, боковые, низ.
+//   - margins — indents from the text, in millimeters.
+//     Formats:
+//     "5/5" — top/bottom = 5 mm, left/right = 5 mm;
+//     "5/3/5/3" - top/right/bottom/left separately;
+//     "5/3/7" - top, side, bottom.
 //
-//   - border — флаг, добавляет тонкую чёрную рамку (≈ 0.5 pt) вокруг QR-кода.
+// - border — a flag that adds a thin black border (≈ 0.5 pt) around the QR code.
 //
-// Возвращает:
+// Returns:
 //
-//	Вставляемый XML-фрагмент <w:drawing> с сгенерированным QR-изображением.
+// Inserted XML fragment <w:drawing> with the generated QR image.
 //
-// Совместимо с Microsoft Word, LibreOffice, OnlyOffice.
+// Compatible with Microsoft Word, LibreOffice, OnlyOffice.
 func QrCode(value string, opts ...string) RawXML {
 	if QrCodeFunc == nil {
 		return ""
