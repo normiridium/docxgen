@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"docxgen/petrovich"
+	"github.com/normiridium/petrovich"
 )
 
 // Declension — declenses the full name in the specified case and format, using petrovich-go.
@@ -56,7 +56,7 @@ func Declension(v any, opts ...string) string {
 			gender = petrovich.Female
 		}
 	} else if len(parts) >= 1 {
-		// если отчества нет — пробуем по фамилии
+		// If there is no patronymic, try by surname
 		last := strings.ToLower(parts[0])
 		switch {
 		case strings.HasSuffix(last, "ов"),

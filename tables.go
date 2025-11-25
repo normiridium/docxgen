@@ -104,29 +104,3 @@ func (t *TableTemplateEngine) Render() string {
 		t.FooterPart +
 		TableEndingTag
 }
-
-// FindTemplateRows is a utility that searches for index scripts of template rows.
-// Returns rowIdx, subRowIdx, titleIdx.
-func FindTemplateRows(tableXML string) (int, int, int, error) {
-	rows := strings.Split(tableXML, TableRowClosingTag)
-	if len(rows) == 0 {
-		return -1, -1, -1, fmt.Errorf("empty table")
-	}
-
-	var rowIdx, subRowIdx, titleIdx = -1, -1, -1
-
-	for i, r := range rows {
-		if strings.Contains(r, "%1") {
-			if rowIdx == -1 {
-				rowIdx = i
-			} else if subRowIdx == -1 {
-				subRowIdx = i
-			}
-		}
-		if strings.Contains(strings.ToLower(r), "итого") {
-			titleIdx = i
-		}
-	}
-
-	return rowIdx, subRowIdx, titleIdx, nil
-}

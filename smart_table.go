@@ -241,7 +241,7 @@ func RenderSmartTable(tableXML string, items []any) (string, error) {
 		}
 	}
 	if len(templates) == 0 {
-		// нет ни одной шаблонной строки → вернуть исходную таблицу
+		// There are no template rows → return the original table
 		return TableOpeningTag + inner + TableEndingTag, nil
 	}
 
@@ -509,7 +509,7 @@ func renderNamedWithUnion(xmlTpl string, meta tplMeta, data map[string]any, unio
 
 // Positional:
 // 1) {`...%[N]s...`|mod} → { `resolved` | mod }
-// 2) голые %[N]s → текст
+// 2) naked %[N]s → text
 func renderPositional(xmlTpl string, arr []any) string {
 	out := xmlTpl
 
@@ -580,7 +580,7 @@ func parseTplMeta(rowXML string) tplMeta {
 // ============================================================================
 
 func normalizeItem(v any) normItem {
-	// Primary case: {"group": {...}} или {"group": []}
+	// Primary case: {"group": {...}} or {"group": []}
 	if outer, ok := v.(map[string]any); ok && len(outer) == 1 {
 		for gk, inner := range outer {
 			switch x := inner.(type) {

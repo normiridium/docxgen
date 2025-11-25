@@ -294,6 +294,7 @@ func (d *Docx) openFragmentDoc(rel string) (*Docx, error) {
 }
 
 // --- extracting fragments ---
+
 func GetBodyFragment(content string) (string, error) {
 	a := strings.Split(content, BodyOpeningTag)
 	if len(a) < 2 {
@@ -340,6 +341,7 @@ func GetParagraphN(content string, n int) (string, error) {
 }
 
 // --- description structure include ---
+
 type BracketIncludeSpec struct {
 	RawTag   string
 	File     string
@@ -524,18 +526,18 @@ func (d *Docx) ProcessTrimTags(body string) string {
 
 // cleanTrimTags — removes spaces, tabs, and hyphens around {~}/{-} by correcting spaces.
 func cleanTrimTags(s string) string {
-	// {~...~} — ест всё
+	// {~...~} — eats everything
 	s = regexp.MustCompile(`[\s]*\{~`).ReplaceAllString(s, "{")
 	s = regexp.MustCompile(`~}[\s]*`).ReplaceAllString(s, "}")
-	// {-...-} — ест только пробелы и табы
+	// {-...-} — eats only spaces and tabs
 	s = regexp.MustCompile(`[ \t]*\{-`).ReplaceAllString(s, "{")
 	s = regexp.MustCompile(`-}[ \t]*`).ReplaceAllString(s, "}")
-	// убираем маркеры
+	// Removing markers
 	s = strings.ReplaceAll(s, "{~", "{")
 	s = strings.ReplaceAll(s, "~}", "}")
 	s = strings.ReplaceAll(s, "{-", "{")
 	s = strings.ReplaceAll(s, "-}", "}")
-	// восстанавливаем пробел перед тегом
+	// Restore the space before the tag
 	s = regexp.MustCompile(`([A-Za-zА-Яа-яЁё])\{`).ReplaceAllString(s, `$1 {`)
 	return s
 }

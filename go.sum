@@ -6,6 +6,10 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/fsnotify/fsnotify v1.9.0 h1:2Ml+OJNzbYCTzsxtv8vKSFD9PbJjmhYF14k/jKC7S9k=
 github.com/fsnotify/fsnotify v1.9.0/go.mod h1:8jBTzvmWwFyi3Pb8djgCCO5IBqzKJ/Jwo8TRcHyHii0=
+github.com/normiridium/petrovich v0.0.0-20251125201837-60ee1b4a926a h1:fh3Trv6Gnuo6R/ACGjl7fKhYCd0jVUFGoV9LPDIbFP4=
+github.com/normiridium/petrovich v0.0.0-20251125201837-60ee1b4a926a/go.mod h1:I2c4KlyPlVaHHm9TaLkE7doCff9CROLvM1ARFpIx3Is=
+github.com/normiridium/rusnum v0.0.0-20251125194557-f17083a5ee4a h1:wqPL5z1D7m62O3TvTNOvXrvfh6Q3geltDvBiIV7+Ijs=
+github.com/normiridium/rusnum v0.0.0-20251125194557-f17083a5ee4a/go.mod h1:elHUcAh9a2NZXQ2Q8xV2Mc4TgzOAUp5pz5orozRswq4=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1vwZ3Je0FKVCfqOLp5zO6trqMLYs0=

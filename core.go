@@ -18,19 +18,19 @@ import (
 	"time"
 )
 
-// sharedMedia — потокобезопасное хранилище медиафайлов (png, jpg и т.п.),
-// используемое всеми экземплярами Docx при генерации документов.
+// sharedMedia — thread-safe storage of media files (png, jpg, etc.),
+// used by all Docx instances when generating documents.
 type sharedMedia struct {
 	mu    sync.Mutex
 	files map[string][]byte
 }
 
-// глобальный экземпляр
+// Global Instance
 var globalMedia = &sharedMedia{
 	files: make(map[string][]byte),
 }
 
-// AddAll — добавляет все файлы из другой карты в общий пул.
+// AddAll — Adds all files from another map to the shared pool.
 func (m *sharedMedia) AddAll(from map[string][]byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -39,7 +39,7 @@ func (m *sharedMedia) AddAll(from map[string][]byte) {
 	}
 }
 
-// ForEach — выполняет действие для каждого файла в пуле.
+// ForEach - Performs an action for each file in the pool.
 func (m *sharedMedia) ForEach(fn func(name string, data []byte)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -48,17 +48,17 @@ func (m *sharedMedia) ForEach(fn func(name string, data []byte)) {
 	}
 }
 
-// Docx представляет собой распакованный DOCX-документ
-// и предоставляет API для чтения, модификации и повторной упаковки.
+// Docx is an unpacked DOCX document
+// and provides an API for reading, modifying, and repackaging.
 //
-// Поля структуры:
-//   - files — все файлы из архива (xml, styles, media и т.п.);
-//   - localMedia — вложения, добавленные внутри текущего экземпляра;
-//   - sourcePath — исходный путь к шаблону;
-//   - extraFuncs — дополнительные зарегистрированные модификаторы;
-//   - fonts — набор шрифтов (для p_split и подобных операций);
-//   - activePart — текущий редактируемый раздел документа ("document", "header1", "footer1" и т.д.).
-//     ⚠️ Не потокобезопасно — нельзя менять в нескольких горутинах одновременно.
+// Structure Fields:
+//   - files — all files from the archive (xml, styles, media, etc.);
+//   - localMedia — attachments added inside the current instance;
+//   - sourcePath — the original path to the template;
+//   - extraFuncs — additional registered modifiers;
+//   - fonts — a set of fonts (for p_split and similar operations);
+//   - activePart — the currently editable section of the document ("document", "header1", "footer1", etc.).
+//     ⚠️ Not flow-safe – you cannot change in several goroutines at the same time.
 type Docx struct {
 	files      map[string][]byte
 	localMedia map[string][]byte
@@ -69,10 +69,10 @@ type Docx struct {
 }
 
 //
-// ──────────────────────────── ОСНОВНЫЕ ОПЕРАЦИИ ────────────────────────────
+// ──────────────────────────── BASIC OPERATIONS ────────────────────────────
 //
 
-// Open — открывает DOCX-файл, распаковывает его и подготавливает структуру.
+// Open - Opens the DOCX file, unpacks it, and prepares the structure.
 func Open(path string) (*Docx, error) {
 	reader, err := zip.OpenReader(path)
 	if err != nil {
@@ -107,7 +107,7 @@ func Open(path string) (*Docx, error) {
 		localMedia: make(map[string][]byte),
 	}
 
-	// Восстанавливаем сломанные теги, чтобы шаблон можно было интерпретировать корректно.
+	//Restoring broken tags so that the template can be interpreted correctly.
 	body, err := doc.ContentPart("document")
 	if err != nil {
 		return nil, err
@@ -124,22 +124,22 @@ func Open(path string) (*Docx, error) {
 	return doc, nil
 }
 
-// Save — записывает все файлы документа обратно в DOCX-архив.
+// Save — writes all files of the document back to the DOCX archive.
 func (d *Docx) Save(path string) error {
 	buffer := new(bytes.Buffer)
 	writer := zip.NewWriter(buffer)
 
-	// 1. Объединяем все медиафайлы в единую карту
-	// mediaByPart — хранит файлы для разных частей документа
+	// 1. Combining all media files into a single card
+	// mediaByPart - stores files for different parts of the document
 	mediaByPart := map[string][]string{}
 	globalMedia.ForEach(func(filename string, data []byte) {
 		d.files[filename] = data
 
 		mediaName := strings.TrimPrefix(filename, "word/media/")
-		// имя секции кодируем в имени файла, например:
-		//   word/media/document_abc.png
-		//   word/media/footer1_xyz.png
-		//   word/media/header2_zzz.png
+		// Encode the section name in the file name, for example:
+		//  word/media/document_abc.png
+		//  word/media/footer1_xyz.png
+		//  word/media/header2_zzz.png
 		parts := strings.SplitN(mediaName, "_", 2)
 		part := "document" // по умолчанию
 
@@ -155,12 +155,12 @@ func (d *Docx) Save(path string) error {
 		mediaByPart[part] = append(mediaByPart[part], mediaName)
 	})
 
-	// 2. Обновляем rels и [Content_Types].xml
+	// 2. Update rels and [Content_Types].xml
 	for part, names := range mediaByPart {
 		d.updateMediaRelationships(part, names)
 	}
 
-	// 3. Создаём ZIP-архив
+	// 3. Create a ZIP archive
 	for name, data := range d.files {
 		name = strings.TrimPrefix(name, "/")
 		name = strings.ReplaceAll(name, "\\", "/")
@@ -192,16 +192,16 @@ func (d *Docx) Save(path string) error {
 }
 
 //
-// ──────────────────────────── РАБОТА С XML ────────────────────────────
+// ──────────────────────────── WORKING WITH XML ────────────────────────────
 //
 
-// GetFile возвращает содержимое файла из архива.
+// GetFile returns the contents of the file from the archive.
 func (d *Docx) GetFile(name string) ([]byte, bool) {
 	data, ok := d.files[name]
 	return data, ok
 }
 
-// SetFile обновляет или добавляет файл в документ.
+// SetFile updates or adds a file to a document.
 func (d *Docx) SetFile(name string, data []byte) {
 	name = strings.ReplaceAll(strings.TrimPrefix(name, "/"), "\\", "/")
 
@@ -212,7 +212,7 @@ func (d *Docx) SetFile(name string, data []byte) {
 	}
 }
 
-// ContentPart возвращает XML тела документа, хедера или футера.
+// ContentPart returns the XML of the document body, header, or footer.
 func (d *Docx) ContentPart(part string) (string, error) {
 	d.activePart = part
 
@@ -229,7 +229,7 @@ func (d *Docx) ContentPart(part string) (string, error) {
 	return string(data), nil
 }
 
-// UpdateContentPart заменяет XML указанного раздела.
+// UpdateContentPart replaces the XML of the specified section.
 func (d *Docx) UpdateContentPart(part, content string) {
 	if !strings.HasPrefix(part, "word/") {
 		part = "word/" + part
@@ -240,9 +240,9 @@ func (d *Docx) UpdateContentPart(part, content string) {
 	d.files[part] = []byte(content)
 }
 
-// ListHeaderFooterParts возвращает имена всех headerX и footerX файлов,
-// реально подключённых к документу через <w:headerReference> / <w:footerReference>.
-// ListHeaderFooterParts возвращает имена всех реально подключённых header*/footer* файлов.
+// ListHeaderFooterParts returns the names of all headerX and footerX files,
+// actually connected to the document via <w:headerReference> / <w:footerReference>.
+// ListHeaderFooterParts returns the names of all header*/footer* files that are actually connected.
 func (d *Docx) ListHeaderFooterParts() []string {
 	const (
 		docPath  = "word/document.xml"
@@ -256,7 +256,7 @@ func (d *Docx) ListHeaderFooterParts() []string {
 		return parts
 	}
 
-	// ищем r:id из <w:headerReference> / <w:footerReference>
+	// look for r:id from <w:headerReference> / <w:footerReference>
 	re := regexp.MustCompile(`<w:(?:headerReference|footerReference)[^>]+r:id="([^"]+)"`)
 	ids := re.FindAllStringSubmatch(string(doc), -1)
 	if len(ids) == 0 {
@@ -288,13 +288,13 @@ func (d *Docx) ListHeaderFooterParts() []string {
 }
 
 //
-// ──────────────────────────── ТЕМПЛАТЫ И МОДИФИКАТОРЫ ────────────────────────────
+// ──────────────────────────── TEMPLATES AND MODIFIERS ────────────────────────────
 //
 
-// ImportBuiltins добавляет встроенные стандартные модификаторы
-// (qrcode, barcode и др.) через общий механизм ImportModifiers.
+// ImportBuiltins adds built-in standard modifiers
+// (QRCODE, BARCODE, etc.) through the common ImportModifiers mechanism.
 func (d *Docx) ImportBuiltins() {
-	// добавляем QR сюда, чтобы несколько документов работали со своими данными, а globalMedia получал сведения о файлах
+	// add QR here so that several documents work with their data, and globalMedia receives information about the files
 	mods := map[string]modifiers.ModifierMeta{
 		"qrcode": {
 			Func: func(value string, opts ...string) modifiers.RawXML {
@@ -317,7 +317,7 @@ func (d *Docx) ImportBuiltins() {
 	d.ImportModifiers(mods)
 }
 
-// ExecuteTemplate выполняет шаблон документа, используя переданные данные.
+// ExecuteTemplate executes a document template using the data that is uploaded.
 func (d *Docx) ExecuteTemplate(data map[string]any) error {
 	parts := d.ListHeaderFooterParts()
 	parts = append(parts, "document")
@@ -345,7 +345,7 @@ func (d *Docx) ExecuteTemplate(data map[string]any) error {
 		content = d.ProcessUnWrapParagraphTags(content)
 		content = d.ProcessTrimTags(content)
 
-		// Преобразуем теги {var|mod} в {{ .var | mod }}
+		// Converting tags {var|mod} to {{ .var | mod }}
 		content = TransformTemplate(content)
 
 		d.ImportBuiltins()
@@ -373,7 +373,7 @@ func (d *Docx) ExecuteTemplate(data map[string]any) error {
 	return nil
 }
 
-// ImportModifiers добавляет набор пользовательских модификаторов.
+// ImportModifiers Adds a set of custom modifiers.
 func (d *Docx) ImportModifiers(mods map[string]modifiers.ModifierMeta) {
 	if d.extraFuncs == nil {
 		d.extraFuncs = make(map[string]modifiers.ModifierMeta)
@@ -383,7 +383,7 @@ func (d *Docx) ImportModifiers(mods map[string]modifiers.ModifierMeta) {
 	}
 }
 
-// AddModifier добавляет один модификатор.
+// AddModifier Adds one modifier.
 func (d *Docx) AddModifier(name string, fn any, args int) {
 	if d.extraFuncs == nil {
 		d.extraFuncs = make(map[string]modifiers.ModifierMeta)
@@ -391,7 +391,7 @@ func (d *Docx) AddModifier(name string, fn any, args int) {
 	d.extraFuncs[name] = modifiers.ModifierMeta{Func: fn, Count: args}
 }
 
-// LoadFontsForPSplit подключает набор шрифтов для модификатора p_split.
+// LoadFontsForPSplit Includes a font set for the p_split modifier.
 func (d *Docx) LoadFontsForPSplit(pathRegular, pathBold, pathItalic, pathBoldItalic string) error {
 	fonts, err := metrics.LoadFonts(pathRegular, pathBold, pathItalic, pathBoldItalic)
 	if err != nil {
@@ -402,10 +402,10 @@ func (d *Docx) LoadFontsForPSplit(pathRegular, pathBold, pathItalic, pathBoldIta
 }
 
 //
-// ──────────────────────────── МЕДИАФАЙЛЫ ────────────────────────────
+// ──────────────────────────── MEDIA ────────────────────────────
 //
 
-// AddImageRel добавляет изображение и возвращает его rId + базовое имя.
+// AddImageRel adds an image and returns its rId + base name.
 func (d *Docx) AddImageRel(data []byte) (string, string) {
 	hash := sha1.Sum(data)
 	base := fmt.Sprintf("%s_%x", d.activePart, hash)
@@ -416,11 +416,11 @@ func (d *Docx) AddImageRel(data []byte) (string, string) {
 	return rId, base
 }
 
-// updateMediaRelationships обновляет связи (rels) и MIME-типы для набора медиафайлов.
+// updateMediaRelationships Updates rels and MIME types for a set of media files.
 func (d *Docx) updateMediaRelationships(part string, filenames []string) {
 	var relsPath = fmt.Sprintf("word/_rels/%s.xml.rels", part)
 
-	// читаем или создаём <Relationships>
+	// READ OR CREATE <Relationships>
 	relsData, _ := d.GetFile(relsPath)
 	if len(relsData) == 0 {
 		relsData = []byte(`<?xml version="1.0" encoding="UTF-8"?><Relationships></Relationships>`)
@@ -470,7 +470,7 @@ func (d *Docx) updateMediaRelationships(part string, filenames []string) {
 	d.updateContentTypes(filenames)
 }
 
-// updateContentTypes добавляет MIME-типы для набора изображений.
+// updateContentTypes adds MIME types to a set of images.
 func (d *Docx) updateContentTypes(filenames []string) {
 	const contentPath = "[Content_Types].xml"
 
@@ -534,13 +534,13 @@ func (d *Docx) updateContentTypes(filenames []string) {
 	d.SetFile(contentPath, append([]byte(xml.Header), out...))
 }
 
-// SaveToWriter — записывает текущий документ DOCX напрямую в поток (например, http.ResponseWriter).
-// Повторяет логику Save(), но не пишет во временный файл.
+// SaveToWriter - Writes the current DOCX document directly to the stream (e.g. http. ResponseWriter).
+// Repeats the Save() logic, but does not write to a temporary file.
 func (d *Docx) SaveToWriter(w io.Writer) error {
 	buffer := new(bytes.Buffer)
 	writer := zip.NewWriter(buffer)
 
-	// 1. Объединяем все медиафайлы в единую карту
+	// 1. Combining all media files into a single card
 	mediaByPart := map[string][]string{}
 	globalMedia.ForEach(func(filename string, data []byte) {
 		d.files[filename] = data
@@ -559,12 +559,12 @@ func (d *Docx) SaveToWriter(w io.Writer) error {
 		mediaByPart[part] = append(mediaByPart[part], mediaName)
 	})
 
-	// 2. Обновляем rels и [Content_Types].xml
+	// 2. Update rels and [Content_Types].xml
 	for part, names := range mediaByPart {
 		d.updateMediaRelationships(part, names)
 	}
 
-	// 3. Создаём ZIP-архив
+	// 3. Create a ZIP archive
 	for name, data := range d.files {
 		name = strings.TrimPrefix(name, "/")
 		name = strings.ReplaceAll(name, "\\", "/")
@@ -590,7 +590,7 @@ func (d *Docx) SaveToWriter(w io.Writer) error {
 		return fmt.Errorf("close zip: %w", err)
 	}
 
-	// 4. Отдаём результат в поток
+	// 4. Giving the result to the stream
 	if _, err := io.Copy(w, buffer); err != nil {
 		return fmt.Errorf("write to stream: %w", err)
 	}

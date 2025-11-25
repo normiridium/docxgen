@@ -29,7 +29,7 @@ func (d *Docx) Barcode(value string, opts ...string) modifiers.RawXML {
 	align := "right"
 	valign := "top"
 	sizeWMM := 40.0
-	sizeHMM := 0.0 // если 0 — считаем 1:3
+	sizeHMM := 0.0 // if 0, count 1:3
 	crop := 0.0
 	hasBorder := false
 	distT, distB, distL, distR := 0, 0, 0, 0
@@ -223,7 +223,7 @@ func parseMMorPercent(token string, pageSizeEMU int) float64 {
 		return v
 	case strings.HasSuffix(token, "%"):
 		v, _ := strconv.ParseFloat(strings.TrimSuffix(token, "%"), 64)
-		// EMU → mm (1 мм = 36000 EMU)
+		// EMU → mm (1 mm = 36000 EMU)
 		pageMM := float64(pageSizeEMU) / 36000
 		return pageMM * v / 100
 	default:
@@ -235,7 +235,7 @@ func parseMMorPercent(token string, pageSizeEMU int) float64 {
 func (d *Docx) GetPageSizeEMU() (width, height int) {
 	data, ok := d.files["word/document.xml"]
 	if !ok {
-		// A4 по умолчанию: 210×297 мм
+		// A4 Default: 210×297mm
 		return 210 * 36000, 297 * 36000
 	}
 	str := string(data)
@@ -244,7 +244,7 @@ func (d *Docx) GetPageSizeEMU() (width, height int) {
 	if w == 0 || h == 0 {
 		return 210 * 36000, 297 * 36000
 	}
-	// значения в twips (1/20 pt), 1 pt = 12700 EMU, 1 twip = 635 EMU
+	// Values in twips (1/20 pt), 1 pt = 12700 EMU, 1 twip = 635 EMU
 	return w * 635, h * 635
 }
 

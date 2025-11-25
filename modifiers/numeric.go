@@ -1,11 +1,12 @@
 package modifiers
 
 import (
-	"docxgen/rusnum"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/normiridium/rusnum"
 )
 
 // -------- Numeral --------
