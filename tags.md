@@ -1,117 +1,110 @@
-# 📘 Справочник специальных тегов docxgen
+# 📘 docxgen Special Tags Reference
 
-В шаблонах docxgen используются не только функции-модификаторы (`|money`, `|plural`, `|declension` и др.),  
-но и встроенные **структурные теги**, управляющие вставками, пробелами, таблицами и циклами.  
-Они обрабатываются внутри движка (`ProcessTrimTags`, `ResolveIncludes`, `ProcessUnWrapParagraphTags`, `ExecuteTemplate`).
-
----
-
-## 🔖 Базовые маркеры
-
-| Синтаксис               | Назначение | Пример                                              |
-|-------------------------|-------------|-----------------------------------------------------|
-| `{tag}`                 | Обычный плейсхолдер данных. | `{fio}` → «Иванов Иван Иванович»                    |
-| `{tag\|mod1\|mod2:arg}` | Тег с модификаторами. | <pre>```{fio\|abbr\|prefix:`гражданин `}```</pre>   |
-| `{.field}`              | Доступ к полю внутри `{range}`. | <pre>```{range .clients}{.name\|abbr}{end}```</pre> |
+In docxgen templates, not only modifier functions (`|money`, `|plural`, `|declension`, etc.) are used,  
+but also built‑in **structural tags** that control insertions, whitespace, tables, and loops.  
+These tags are processed inside the engine (`ProcessTrimTags`, `ResolveIncludes`, `ProcessUnWrapParagraphTags`, `ExecuteTemplate`).
 
 ---
 
-## 🧩 Управление пробелами и переносами
+## 🔖 Basic Markers
 
-| Синтаксис | Назначение | Пример                                                          |
-|------------|-------------|-----------------------------------------------------------------|
-| `{-tag-}` | Удаляет пробелы и табы вокруг тега. | `слово {-tag-} слово` → `словотекстслово`                       |
-| `{~tag~}` | Удаляет пробелы, табы и переносы вокруг тега. | ```строка {tag~}\n\n\nстрока``` → `строка текстстрока` |
-| `{-tag}` / `{tag-}` | Обрезает пробелы только с одной стороны. | `{tag-} слово` → `текстслово`                     |
-
----
-
-## 🧱 Блочные теги и вставки
-
-| Синтаксис | Назначение | Пример |
-|------------|-------------|--------|
-| `{*tag*}` | "Разворачивает" параграф в отдельный блок. | `{*include_block*}` |
-| `[include/file.docx]` | Вставка содержимого `<w:body>` из внешнего DOCX. | `[include/blocks/sign.docx]` |
-| `[include/file.docx/table/2]` | Вставка второй таблицы из файла. | `[include/report.docx/table/2]` |
-| `[include/file.docx/p/3]` | Вставка третьего параграфа. | `[include/text.docx/p/3]` |
-
-📄 Поддерживаемые фрагменты:
-- `body` — всё содержимое документа;
-- `table` — таблицы (`1..N`);
-- `p` или `paragraph` — параграфы (`1..N`).
-
-Файлы `.docx` ищутся относительно каталога шаблона.  
-Пути защищены через `SecureJoin`, чтобы исключить выход за пределы каталога проекта.
+| Syntax               | Purpose | Example |
+|----------------------|---------|---------|
+| `{tag}`              | Regular data placeholder. | `{fio}` → “Ivanov Ivan Ivanovich” |
+| `{tag\|mod1\|mod2:a}` | Tag with modifiers. | `{fio\|abbr\|prefix:\`citizen \`}` |
+| `{.field}`           | Access to field inside `{range}`. | `{range .clients}{.name\|abbr}{end}` |
 
 ---
 
-## 📊 Таблицы и циклы
+## 🧩 Whitespace & Line Control
 
-| Синтаксис | Назначение | Пример |
-|------------|-------------|--------|
-| `[table/name]` | Начало определения табличного блока. | `[table/budget_report]` |
-| `[/table]` | Конец табличного блока. | `[/table]` |
-| `{range .collection}{...}{end}` | Перебор элементов списка (аналог Go templates). | `{range .clients}{.name|abbr}{end}` |
-| `{range .clients}[include/blocks/sign.docx]{end}` | Вставка внешнего блока для каждого элемента коллекции. | `{range .clients}[include/blocks/sign.docx]{end}` |
-| `{n}`, `{annotation}`, `{deadline}`, `{price|money}` | Теги, используемые внутри строк таблицы. | `{price|money}` |
+| Syntax | Purpose | Example |
+|--------|---------|---------|
+| `{-tag-}` | Removes spaces and tabs around the tag. | `word {-tag-} word` → `wordtextword` |
+| `{~tag~}` | Removes spaces, tabs **and line breaks** around the tag. | `line {tag~}\n\n\nline` → `linetextline` |
+| `{-tag}` / `{tag-}` | Removes whitespace only on one side. | `{tag-} word` → `textword` |
 
 ---
 
-### 🧩 Как это работает
+## 🧱 Block Tags & Includes
 
-- `[table/name] ... [/table]` объявляет шаблон таблицы, который движок клонирует для каждой строки данных с ключом `name` в JSON.
-- Каждый элемент массива `budget_report` из данных подставляется внутрь этой таблицы.
-- Вложенные `{range}` могут использоваться как внутри таблицы, так и вне её — например, для повторения подписных блоков.
+| Syntax | Purpose | Example |
+|--------|---------|---------|
+| `{*tag*}` | “Unwraps” a paragraph into a standalone block. | `{*include_block*}` |
+| `[include/file.docx]` | Inserts `<w:body>` content from external DOCX. | `[include/blocks/sign.docx]` |
+| `[include/file.docx/table/2]` | Inserts the second table from DOCX. | `[include/report.docx/table/2]` |
+| `[include/file.docx/p/3]` | Inserts the third paragraph. | `[include/text.docx/p/3]` |
 
-**Пример таблицы:**
+Supported fragments:
+- `body` — whole document body  
+- `table` — tables (1..N)  
+- `p` / `paragraph` — paragraphs (1..N)
+
+---
+
+## 📊 Tables & Loops
+
+| Syntax | Purpose | Example |
+|--------|---------|---------|
+| `[table/name]` | Begin a table block. | `[table/budget_report]` |
+| `[/table]` | End a table block. | `[/table]` |
+| `{range .collection}{...}{end}` | Iteration (Go template style). | `{range .clients}{.name\|abbr}{end}` |
+| `{range .clients}[include/blocks/sign.docx]{end}` | External block per element. | `{range .clients}[include/blocks/sign.docx]{end}` |
+| `{n}`, `{annotation}`, `{deadline}`, `{price\|money}` | Tags inside table rows. | `{price\|money}` |
+
+### How It Works
+
+- `[table/name] ... [/table]` declares a table template.  
+- Engine clones it for each element in corresponding data array.  
+- Nested `{range}` allowed both inside and outside tables.
 
 <pre>
 [table/budget_report]
 ╔══════╦═════════════════════════════════════╦═══════════════╦═══════════════╗
-║ Этап ║                Срок                 ║   Описание    ║   Стоимость   ║
+║  №№  ║               Deadline              ║ Annotation    ║     Price     ║
 ╠══════╩═════════════════════════════════════╩═══════════════╩═══════════════╣
-║                  {title_sub_block} (подзаголовок секции)                   ║
+║                    {title_sub_block} (subtitle section)                    ║
 ╠══════╦═════════════════════════════════════╦═══════════════╦═══════════════╣
 ║  {n} ║ {deadline|date_format:`02.01.2006`} ║ {annotation}  ║ {price|money} ║
 ╚══════╩═════════════════════════════════════╩═══════════════╩═══════════════╝
 [/table]
 </pre>
-→ при генерации создаёт таблицу с данными из массива `budget_report`.
 
 ---
 
-📘 **Пример комбинированного цикла:**
+## 📘 Combined Loop Example
 
 ```
 {range .clients}[include/blocks/sign.docx]{end}
 ```
 
-⟶ Для каждого клиента из массива `clients` будет вставлен блок `sign.docx`,  
-который сам содержит внутренние теги (`{.name}`, `{.phone}` и т.д.).
+⟶ Inserts `sign.docx` for each client, with tags like `{.name}`, `{.phone}`, etc.
 
 ---
 
-🧩 Внутри циклов доступны:
-- `.field` — текущее значение поля структуры (`{.name}`);
-- `.index` — порядковый номер (если предусмотрено в шаблоне);
-- вложенные модификаторы (`|abbr`, `|nowrap`, `|declension` и др.).
+## Inside loops you can use:
+
+- `.field` — current field (`{.name}`)  
+- `.index` — index (if implemented)  
+- Any modifiers (`|abbr`, `|nowrap`, `|declension`, etc.)
 
 ---
 
-## 🧭 Специальные элементы
+## 🧭 Special Elements
 
-| Синтаксис                | Описание                                                    | Пример                                      |
-|--------------------------|-------------------------------------------------------------|---------------------------------------------|
-| `{project.code\|qrcode}` | Вставляет QR-код с параметрами позиционирования и размером. | ```{link\|qrcode:`8%`:`5/5`:`border`}```    |
-| `{range ...}{end}`       | Перебор коллекций (аналог Go templates).                    | `{range .clients}{.name} — {.phone}{end}`   |
-| `{~}` / `{-}`            | Управление пробелами и переносами внутри других тегов.      | `текст {~fio-} текст 2`                     |
+| Syntax | Description | Example |
+|--------|-------------|---------|
+| `{project.code\|qrcode}` | Inserts a QR code. | `{link\|qrcode:\`8%\`:\`5/5\`:\`border\`}` |
+| `{range ...}{end}` | Loop. | `{range .clients}{.name} — {.phone}{end}` |
+| `{~}` / `{-}` | Whitespace control. | `text {~fio-} text2` |
 
 ---
 
-## ⚙️ Порядок обработки
+## ⚙️ Processing Order
 
-1. **RepairTags** — восстанавливает `{}` и `[]`, если Word разделил их на несколько `<w:t>`.
-2. **ProcessUnWrapParagraphTags** — превращает `{*tag*}` в отдельные блочные вставки.
-3. **ResolveIncludes** — подставляет `[include/...]` перед выполнением шаблона.
-4. **ProcessTrimTags** — структурно обрабатывает `{~}` и `{-}`, удаляя пробелы.
-5. **ExecuteTemplate** — применяет Go-шаблон с модификаторами (`|money`, `|abbr`, `|declension` и др.).
+1. **RepairTags** — merges `{}` / `[]` if Word split them.  
+2. **ProcessUnWrapParagraphTags** — expands `{*tag*}` into blocks.  
+3. **ResolveIncludes** — applies `[include/... ]`.  
+4. **ProcessTrimTags** — handles whitespace tags.  
+5. **ExecuteTemplate** — applies Go template engine + modifiers.
+

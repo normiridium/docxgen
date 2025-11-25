@@ -1,31 +1,31 @@
-# 📄 docxgen — генератор DOCX-документов на Go
+# 📄 docxgen — DOCX Document Generator for Go
 
-**docxgen** — это лёгкий движок для подстановки данных в шаблоны DOCX (Word) с модификаторами, таблицами, изображениями, штрихкодами и QR-кодами.  
-Он умеет работать как **CLI-утилита** и как **HTTP-демон (API)** для генерации документов на сервере.
-
----
-
-## 🚀 Возможности
-
-- Подстановка JSON-данных в DOCX-шаблоны.
-- Поддержка модификаторов (`upper`, `lower`, `wrap`, `gender_select` и др.).
-- Вставка QR- и штрих-кодов прямо в шаблон.
-- Автоматическая пересборка (`--watch`) при изменении шаблона или данных.
-- Режим демона `--serve` с HTTP API для интеграций.
-- Поддержка XML-режима для отладки шаблонов.
-- Работа с локальными и base64-шаблонами.
-- Вывод результата сразу в PDF (`--pdf`).
-- Live Preview PDF в браузере при `--watch --pdf-preview`.
+**docxgen** is a lightweight engine for injecting data into DOCX (Word) templates with modifiers, tables, images, barcodes, and QR codes.  
+It can work both as a **CLI tool** and as an **HTTP daemon (API)** for server‑side document generation.
 
 ---
 
-## 🧩 Установка
+## 🚀 Features
+
+- Insert JSON data into DOCX templates.
+- Modifier support (`upper`, `lower`, `wrap`, `gender_select`, etc.).
+- Insert QR codes and barcodes directly into templates.
+- Automatic rebuild (`--watch`) when templates or data change.
+- Daemon mode `--serve` with HTTP API for integrations.
+- XML output mode for debugging templates.
+- Supports local or base64‑encoded templates.
+- Output directly to PDF (`--pdf`).
+- Live PDF preview in a browser when using `--watch --pdf-preview`.
+
+---
+
+## 🧩 Installation
 
 ```bash
 go install github.com/normiridium/docxgen/main@latest
 ```
 
-или клонирование:
+or clone:
 
 ```bash
 git clone https://github.com/normiridium/docxgen.git
@@ -35,41 +35,42 @@ go run . --help
 
 ---
 
-## 🛠️ Пример использования (CLI)
+## 🛠️ CLI Usage Example
 
 ```bash
-go run .   --in ../examples/template.docx   --data ../examples/data.json   --out ../examples/result.docx
+go run . --in ../examples/template.docx --data ../examples/data.json --out ../examples/result.docx
 ```
 
-или чтобы следить за изменениями и пересобирать автоматически:
+or enable watch mode with automatic rebuilds:
 
 ```bash
 go run . --watch
 ```
 
-📘 Пример логов:
+📘 Example log:
 ```
-💚 готово: /examples/template_out.docx
-👀  watch-режим (Ctrl+C — выход)
-📝  изменено: template.docx → жду дебаунс…
-🔄  пересборка…
-💚  готово: /examples/template_out.docx
+💚 ready: /examples/template_out.docx
+👀  watch mode (Ctrl+C to exit)
+📝  changed: template.docx → waiting for debounce…
+🔄  rebuilding…
+💚  ready: /examples/template_out.docx
 ```
 
 ---
 
-## 🌐 HTTP API (режим демона)
+## 🌐 HTTP API (Daemon Mode)
 
-Запустить сервер:
+Run the server:
+
 ```bash
 go run . --serve
 ```
 
-по умолчанию он слушает `http://localhost:8080`.
+By default it listens at `http://localhost:8080`.
 
 ---
 
-### ▶️ Генерация DOCX
+### ▶️ Generate DOCX
 
 **POST /generate**
 
@@ -80,18 +81,18 @@ Content-Type: application/json
 {
   "template": "examples/test.docx",
   "data": {
-    "fio": "Иванов Иван Иванович",
-    "project": "Шаблонизатор DocX"
+    "fio": "Ivanov Ivan Ivanovich",
+    "project": "DocX Template Engine"
   }
 }
 ```
 
-📤 Ответ: файл `result.docx`  
+📤 Response: `result.docx`  
 📄 Content-Type: `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
 
 ---
 
-### 🔍 XML-просмотр
+### 🔍 XML Output
 
 **POST /generate**
 
@@ -103,23 +104,25 @@ Content-Type: application/json
   "template": "examples/test.docx",
   "format": "xml",
   "data": {
-    "fio": "Иванов Иван Иванович"
+    "fio": "Ivanov Ivan Ivanovich"
   }
 }
 ```
 
-📄 Ответ: `application/xml`, тело документа Word в XML-виде.
+📄 Response: `application/xml`, raw Word document XML.
 
 ---
 
-### 🧾 Генерация PDF
+### 🧾 PDF Generation
 
 **CLI:**
+
 ```bash
 go run . --pdf --in examples/template.docx --data examples/data.json --out examples/result.pdf
 ```
 
 **HTTP API:**
+
 ```http
 POST http://localhost:8080/generate
 Content-Type: application/json
@@ -127,64 +130,64 @@ Content-Type: application/json
 {
   "template": "examples/test.docx",
   "format": "pdf",
-  "data": { "fio": "Иванов Иван Иванович" }
+  "data": { "fio": "Ivanov Ivan Ivanovich" }
 }
 ```
 
-📤 Ответ: `application/pdf`  
-📄 Можно открыть прямо в браузере или сохранить.
+📤 Response: `application/pdf`  
+📄 Can be viewed in-browser or saved.
 
 ---
 
-### 🖥️ Live Preview PDF
+### 🖥️ Live PDF Preview
 
 ```bash
 go run . --watch --pdf-preview
 ```
 
-docxgen запустит локальный сервер предпросмотра PDF на `http://localhost:8090`  
-и автоматически обновит PDF при каждом изменении шаблона.
+docxgen launches a local PDF preview server at `http://localhost:8090`  
+and automatically updates the PDF when the template changes.
 
 ---
 
-## 💡 Модификаторы
+## 💡 Modifiers
 
-| Имя | Пример                                                                                | Результат |
-|-----|---------------------------------------------------------------------------------------|------------|
-| `wrap` | `{fio\|wrap:"<<":">>"}`                                           | <<Иванов Иван Иванович>> |
-| `gender_select` | `{fio\|gender_select:"Уважаемый":"Уважаемая"}` | выбирает форму по полу или ФИО |
-
----
-
-## ⚙️ Аргументы командной строки
-
-| Флаг | Описание |
-|------|-----------|
-| `--in` | Входной DOCX-шаблон |
-| `--data` | JSON-файл с данными |
-| `--out` | Путь для сохранения результата |
-| `--watch` | Следить за изменениями и пересобирать |
-| `--download` | Выводить DOCX в stdout вместо сохранения |
-| `--serve` | Запустить HTTP-демон |
-| `--port` | Порт демона (по умолчанию `8080`) |
-| `--pdf` | Сохранять результат как PDF |
-| `--pdf-preview` | Просмотр PDF в браузере при `--watch` |
+| Name | Example | Result |
+|------|---------|---------|
+| `wrap` | `{fio\|wrap:"<<":">>"}` | <<Ivanov Ivan Ivanovich>> |
+| `gender_select` | `{fio\|gender_select:"Dear Sir":"Dear Madam"}` | selects correct form using gender or FIO |
 
 ---
 
-## 🌸 Пример JSON-данных
+## ⚙️ Command-Line Flags
+
+| Flag | Description |
+|------|-------------|
+| `--in` | Input DOCX template |
+| `--data` | JSON file with data |
+| `--out` | Output path |
+| `--watch` | Watch for changes and rebuild |
+| `--download` | Write DOCX to stdout instead of saving |
+| `--serve` | Start HTTP daemon |
+| `--port` | Daemon port (default `8080`) |
+| `--pdf` | Save result as PDF |
+| `--pdf-preview` | Browser preview of PDF when using `--watch` |
+
+---
+
+## 🌸 Example JSON Data
 
 ```json
 {
-  "fio": "Иванов Иван Иванович",
-  "project": "Шаблонизатор DocX",
+  "fio": "Ivanov Ivan Ivanovich",
+  "project": "DocX Template Engine",
   "date": "2025-11-03"
 }
 ```
 
 ---
 
-## 🪶 Лицензия
+## 🪶 License
 
 MIT © 2025 — normiridium  
-Создано с любовью и вниманием к деталям 📄
+Created with love and attention to detail 📄
